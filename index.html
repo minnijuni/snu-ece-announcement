@@ -381,6 +381,7 @@
     <div class="tags" id="detail-tags"></div>
     <h1 class="detail-title" id="detail-title"></h1>
     <p class="detail-meta" id="detail-meta"></p>
+    <dl class="detail-dates" id="detail-dates" hidden></dl>
     <div class="detail-hero" id="detail-hero" hidden
          ontouchstart="startImageSwipe(event)" ontouchend="endImageSwipe(event, 'detail')">
         <button class="detail-image-nav previous" id="detail-image-prev" type="button"
@@ -442,7 +443,7 @@
             </nav>
             <nav class="footer-column" aria-label="문의">
                 <h2 class="footer-column-title">문의</h2>
-                <ul class="footer-link-list">
+                <ul class="footer-link-list footer-tutorial-links">
                     <li><button type="button" onclick="openContactFromRail()">일반 문의</button></li>
                     <li><a href="./banner-inquiry.html">홍보 신청</a></li>
                     <li><a href="./faq.html">자주 묻는 질문</a></li>
@@ -467,13 +468,15 @@
         </div>
 
         <div class="site-footer-sync" id="footer-sync" data-state="loading" aria-live="polite">
-            <svg class="footer-sync-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 stroke-width="2.2" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round"
-                      d="M20 11a8 8 0 0 0-14-4.9L4 8m0-4v4h4m-4 5a8 8 0 0 0 14 4.9l2-1.9m0 4v-4h-4"/>
-            </svg>
-            <span class="footer-sync-label" id="footer-sync-label">동기화 상태 확인 중</span>
-            <span class="footer-sync-detail" id="footer-sync-detail"></span>
+            <span class="footer-sync-content">
+                <svg class="footer-sync-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2.2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          d="M20 11a8 8 0 0 0-14-4.9L4 8m0-4v4h4m-4 5a8 8 0 0 0 14 4.9l2-1.9m0 4v-4h-4"/>
+                </svg>
+                <span class="footer-sync-label" id="footer-sync-label">동기화 상태 확인 중</span>
+                <span class="footer-sync-detail" id="footer-sync-detail"></span>
+            </span>
         </div>
 
         <div class="site-footer-legal">
@@ -550,6 +553,24 @@
     </div>
 </div>
 
+<div class="overlay" id="beta-rating-modal" onclick="if(event.target===this) closeBetaRatingPrompt()">
+    <div class="modal beta-rating-prompt" role="dialog" aria-modal="true" aria-labelledby="beta-rating-title"
+         onclick="event.stopPropagation()">
+        <button class="close-btn" type="button" onclick="closeBetaRatingPrompt()" aria-label="닫기">×</button>
+        <p class="beta-rating-kicker">베타 테스팅</p>
+        <h2 id="beta-rating-title">공지방 사용은 어떠셨나요?</h2>
+        <p class="beta-rating-help" id="beta-rating-help">공지 3개를 열어본 시점의 평가를 남겨주세요. 익명으로 집계됩니다.</p>
+        <div class="beta-rating-buttons" role="group" aria-label="5점 평점">
+            <button type="button" onclick="submitBetaRating(1)" aria-label="1점">1</button>
+            <button type="button" onclick="submitBetaRating(2)" aria-label="2점">2</button>
+            <button type="button" onclick="submitBetaRating(3)" aria-label="3점">3</button>
+            <button type="button" onclick="submitBetaRating(4)" aria-label="4점">4</button>
+            <button type="button" onclick="submitBetaRating(5)" aria-label="5점">5</button>
+        </div>
+        <button class="beta-rating-later" type="button" onclick="closeBetaRatingPrompt()">지금은 넘기기</button>
+    </div>
+</div>
+
 <div class="overlay image-viewer" id="image-viewer-modal" role="dialog" aria-modal="true"
      aria-label="공지 이미지 크게 보기" onclick="closeModal('image-viewer-modal')">
     <header class="image-viewer-toolbar" onclick="event.stopPropagation()">
@@ -619,10 +640,10 @@
     </div>
 </div>
 
-<script src="./js/config.js"></script>
-<script src="./js/core.js"></script>
-<script src="./js/desktop.js"></script>
-<script src="./js/mobile.js"></script>
-<script src="./js/tutorial.js"></script>
+<script defer src="./js/config.js"></script>
+<script defer src="./js/core.js"></script>
+<script defer src="./js/desktop.js"></script>
+<script defer src="./js/mobile.js"></script>
+<script defer src="./js/tutorial.js"></script>
 </body>
 </html>

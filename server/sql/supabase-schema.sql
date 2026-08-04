@@ -29,6 +29,20 @@ create table if not exists public.notices (
 
 create index if not exists notices_active_created_idx on public.notices (is_deleted, created_at desc);
 
+-- 익명 베타 분석: 원본 식별자·IP·사용자 에이전트는 저장하지 않는다.
+create table if not exists public.beta_analytics_events (
+  id bigint generated always as identity primary key,
+  event_type text not null check (event_type in ('page_view', 'return_visit', 'rating')),
+  session_hash text not null,
+  page_path text not null default '/',
+  rating smallint check (rating between 1 and 5),
+  created_at timestamptz not null default now()
+);
+create index if not exists beta_analytics_events_created_idx on public.beta_analytics_events (created_at desc);
+create index if not exists beta_analytics_events_session_idx on public.beta_analytics_events (session_hash, created_at desc);
+alter table public.beta_analytics_events enable row level security;
+revoke all on public.beta_analytics_events from anon, authenticated;
+
 create table if not exists public.app_settings (
   id integer primary key,
   admin_name text not null,

@@ -59,7 +59,18 @@ form { display: grid; gap: 10px; }
 }
 .role-option:hover { border-color: #b9c6e2; background: #f7f9fd; }
 .role-option:has(input:checked) { border-color: var(--navy); background: #f2f6fd; }
-.role-option input { width: 16px; height: 16px; margin: 0; grid-row: span 2; accent-color: var(--navy); }
+.role-option input {
+    width: 16px;
+    height: 16px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    grid-row: span 2;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    accent-color: var(--navy);
+}
 .role-name { font-size: 14px; font-weight: 800; }
 .role-desc { grid-column: 2; color: var(--sub); font-size: 11.5px; line-height: 1.45; }
 .role-option:has(input:focus-visible) { outline: 2px solid var(--navy); outline-offset: 2px; }

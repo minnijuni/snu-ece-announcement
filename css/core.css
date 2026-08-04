@@ -90,6 +90,12 @@ body {
     letter-spacing: -0.1px;
 }
 .footer-link-list { margin: 0; padding: 0; list-style: none; }
+.footer-tutorial-links {
+    width: max-content;
+    max-width: 100%;
+    margin: -4px -8px;
+    padding: 4px 8px;
+}
 .footer-link-list li { margin: 0; }
 .footer-link-list a,
 .footer-link-list button,
@@ -131,6 +137,15 @@ body {
     border-top: 1px solid var(--border-soft);
     color: #6f7885;
     font-size: 12px;
+}
+.footer-sync-content {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    max-width: 100%;
+    margin: -5px -8px;
+    padding: 5px 8px;
 }
 .footer-sync-icon { width: 14px; height: 14px; flex-shrink: 0; }
 .footer-sync-label { font-weight: 700; }
@@ -583,7 +598,7 @@ body {
 .category-tab:hover { color: var(--primary); }
 .category-tab.active {
     color: var(--primary-deep);
-    font-weight: 800;
+    font-weight: 750;
     border-bottom-color: var(--primary-deep);
 }
 .category-tab:focus-visible { outline: 2px solid var(--primary); outline-offset: -4px; }
@@ -992,12 +1007,14 @@ body {
     text-align: center;
     font-variant-numeric: tabular-nums;
 }
-/* 서울대 소식 카드 스타일. 모든 카드는 같은 높이다:
+/* 서울대 소식 카드 스타일. 기본 높이는 맞추되 긴 제목과 날짜가 들어오면
+   카드가 늘어나 내용을 잘라내지 않는다:
    포스터(사진 또는 큰 제목) → 제목 → 날짜(요일 포함) → 본문 발췌. */
 .card {
     background: var(--card-bg);
     border: 1px solid var(--border);
-    height: 440px;
+    min-height: 440px;
+    height: auto;
     position: relative;
     min-width: 0;
     overflow: hidden;
@@ -1071,6 +1088,7 @@ body {
     font-size: 11.5px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 .card-poster-title {
     /* 제목 길이에 따라 renderPosterTitle이 --poster-title-size를 넘겨준다.
@@ -1170,14 +1188,16 @@ body {
 .card-title {
     margin: 0; font-size: 16.5px; line-height: 1.45;
     word-break: keep-all; font-weight: 700; color: var(--text-main);
-    display: -webkit-box;
-    overflow: hidden;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
+    display: block;
+    overflow-wrap: anywhere;
 }
 .card-date {
     font-size: 12.5px; color: var(--text-sub); font-weight: 600;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    max-width: 100%;
+    letter-spacing: -0.03em;
+    font-size: clamp(10.5px, 0.82vw, 12.5px);
 }
 .card-excerpt {
     margin: 0;
@@ -1218,19 +1238,17 @@ body {
 body.notice-dragging .notice-hover-preview { display: none !important; }
 .notice-hover-preview-body { padding: 14px 16px 15px; }
 .notice-hover-preview-label { color: var(--primary); font-size: 11px; font-weight: 800; letter-spacing: 0.08em; }
-.notice-hover-preview h3 {
-    margin: 6px 0 7px; overflow: hidden; color: var(--text-main); font-size: 16px; line-height: 1.4;
-    text-overflow: ellipsis; white-space: nowrap;
-}
 .notice-hover-preview-summary-list {
     display: grid;
     gap: 4px;
-    margin: 0;
+    margin: 8px 0 0;
     padding-left: 18px;
-    color: #5b6270;
-    font-size: 13px;
-    line-height: 1.48;
+    color: #111827;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.55;
 }
+.notice-hover-preview-summary-list li::marker { color: #111827; }
 .notice-hover-preview-summary-list li {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2134,6 +2152,11 @@ body.reordering-compare-block .compare-trash-zone {
     margin: 0 0 24px; color: var(--text-sub); font-weight: 500;
     padding-bottom: 20px; border-bottom: 1px solid var(--border);
 }
+.card.is-thumbnail-fallback .card-title { display: block; }
+.detail-dates { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: -10px 0 24px; }
+.detail-dates div { padding: 10px 12px; background: #f7f8fb; border-left: 3px solid var(--primary); }
+.detail-dates dt { color: var(--text-sub); font-size: 11px; font-weight: 800; }
+.detail-dates dd { margin: 4px 0 0; color: var(--text-main); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .detail-hero { position: relative; margin-bottom: 18px; }
 .detail-hero img {
     width: 100%; max-height: 520px; object-fit: contain;
@@ -2407,3 +2430,12 @@ body.reordering-compare-block .compare-trash-zone {
 .filter-switch input:focus-visible + .filter-switch-track { outline: 2px solid var(--primary); outline-offset: 2px; }
 .filter-switch-text { font-size: 13px; font-weight: 600; line-height: 1.5; }
 .filter-switch-text small { display: block; margin-top: 2px; color: var(--text-sub); font-size: 11.5px; font-weight: 500; }
+
+.beta-rating-prompt { width: min(420px, 100%); text-align: center; }
+.beta-rating-kicker { margin: 0 0 7px; color: var(--primary); font-size: 11px; font-weight: 850; letter-spacing: .12em; }
+.beta-rating-prompt h2 { margin: 0; color: var(--text-main); font-size: 21px; }
+.beta-rating-help { margin: 10px 0 0; color: var(--text-sub); font-size: 13px; line-height: 1.65; word-break: keep-all; }
+.beta-rating-buttons { display: flex; justify-content: center; gap: 8px; margin-top: 18px; }
+.beta-rating-buttons button { width: 44px; height: 42px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text-main); cursor: pointer; font-size: 15px; font-weight: 800; }
+.beta-rating-buttons button:hover, .beta-rating-buttons button:focus-visible { border-color: var(--primary); background: var(--primary); color: #fff; }
+.beta-rating-later { margin-top: 14px; padding: 7px 10px; color: var(--text-sub); background: transparent; border: 0; cursor: pointer; font: inherit; font-size: 12px; }

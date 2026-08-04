@@ -49,6 +49,7 @@ const settingsFilePath = path.join(__dirname, 'data', 'settings.json');
 const bannerFilePath = path.join(__dirname, 'data', 'banner-slides.json');
 const automationFilePath = path.join(__dirname, 'data', 'automation.json');
 const feedbackFilePath = path.join(__dirname, 'data', 'feedback.json');
+const analyticsFilePath = path.join(__dirname, 'data', 'beta-analytics.json');
 const bannerInquiryImageDir = path.join(__dirname, 'data', 'banner-inquiry-images');
 const thumbnailCacheDir = path.join(__dirname, 'data', 'thumbnail-cache');
 const SUPER_ADMIN_TOKEN = process.env.SUPER_ADMIN_TOKEN || process.env.ADMIN_TOKEN || '';
@@ -381,6 +382,12 @@ const feedbackLimiter = rateLimit({
     legacyHeaders: false,
     message: { error: '피드백 전송이 너무 많습니다. 잠시 후 다시 시도해주세요.' }
 });
+const analyticsLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false
+});
 
 // 소비자 화면의 JS·CSS와 공지 JSON을 전송 단계에서 압축한다.
 // 1KB 이하는 압축 비용이 이득보다 커서 그대로 보낸다.
@@ -397,6 +404,7 @@ app.use('/api/internal/crawl', crawlTriggerLimiter);
 app.use('/api/summary', analysisLimiter);
 app.use('/api/feedback', feedbackLimiter);
 app.use('/api/banner-inquiries', feedbackLimiter);
+app.use('/api/analytics/events', analyticsLimiter);
 
 app.use((req, res, next) => {
     const allowedOrigin = process.env.FRONTEND_ORIGIN;
@@ -2572,6 +2580,111 @@ app.get('/api/settings', async (req, res) => {
 
 // ---------- 익명 피드백 ----------
 // 신원(IP·이름·연락처)을 저장하지 않는다. 순수하게 메시지와 시각만 남긴다.
+// ---------- Beta anonymous analytics ----------
+// Do not retain IP addresses, names, user agents, or raw browser identifiers.
+const ANALYTICS_EVENT_TYPES = new Set(['page_view', 'return_visit', 'rating']);
+
+async function readAnalytics() {
+    if (useSupabase) {
+        const { data, error } = await supabase.from('beta_analytics_events')
+            .select('event_type, session_hash, page_path, rating, created_at')
+            .order('created_at', { ascending: false }).limit(50_000);
+        if (error) throw error;
+        return data || [];
+    }
+    try { return JSON.parse(await fs.readFile(analyticsFilePath, 'utf-8')); } catch { return []; }
+}
+
+async function writeAnalytics(events) {
+    await fs.mkdir(path.dirname(analyticsFilePath), { recursive: true });
+    await fs.writeFile(analyticsFilePath, JSON.stringify(events.slice(-50_000), null, 2), 'utf-8');
+}
+
+function buildBetaAnalyticsSummary(events, month = '') {
+    const targetMonth = /^\d{4}-\d{2}$/.test(month) ? month : new Date().toISOString().slice(0, 7);
+    const selected = events.filter(event => String(event.created_at || '').startsWith(targetMonth));
+    const pageViews = selected.filter(event => event.event_type === 'page_view');
+    const returning = selected.filter(event => event.event_type === 'return_visit');
+    const ratings = selected.filter(event => event.event_type === 'rating' && Number(event.rating) >= 1 && Number(event.rating) <= 5);
+    const visitorId = event => event.session_hash || '';
+    const visitors = new Set(pageViews.map(visitorId).filter(Boolean));
+    const returningVisitors = new Set(returning.map(visitorId).filter(Boolean));
+    const ratingsByScore = Object.fromEntries([1, 2, 3, 4, 5].map(score => [score, 0]));
+    ratings.forEach(event => { ratingsByScore[Number(event.rating)] += 1; });
+    const daily = new Map();
+    pageViews.forEach(event => {
+        const date = String(event.created_at || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+        const row = daily.get(date) || { date, pageViews: 0, visitors: new Set(), returningVisitors: new Set() };
+        row.pageViews += 1;
+        if (visitorId(event)) row.visitors.add(visitorId(event));
+        daily.set(date, row);
+    });
+    returning.forEach(event => {
+        const row = daily.get(String(event.created_at || '').slice(0, 10));
+        if (row && visitorId(event)) row.returningVisitors.add(visitorId(event));
+    });
+    return {
+        month: targetMonth, pageViews: pageViews.length, uniqueVisitors: visitors.size,
+        returningVisitors: returningVisitors.size,
+        returnRate: visitors.size ? Math.round(returningVisitors.size / visitors.size * 1000) / 10 : null,
+        ratingCount: ratings.length,
+        averageRating: ratings.length ? Math.round(ratings.reduce((sum, event) => sum + Number(event.rating), 0) / ratings.length * 100) / 100 : null,
+        ratingsByScore,
+        daily: [...daily.values()].sort((a, b) => a.date.localeCompare(b.date)).map(row => ({
+            date: row.date, pageViews: row.pageViews, uniqueVisitors: row.visitors.size, returningVisitors: row.returningVisitors.size
+        }))
+    };
+}
+
+function buildBetaReportMarkdown(summary) {
+    const rate = summary.returnRate === null ? '-' : `${summary.returnRate}%`;
+    const rating = summary.averageRating === null ? '평가 없음' : `${summary.averageRating} / 5 (${summary.ratingCount}건)`;
+    return [
+        `# SNU ECE 공지방 베타 운영 보고서 (${summary.month})`, '',
+        `> 생성일: ${new Date().toISOString().slice(0, 10)} · 개인정보를 수집하지 않는 익명 집계 기준`, '',
+        '## 핵심 지표', '',
+        `- 페이지 조회수: ${summary.pageViews.toLocaleString()}회`,
+        `- 순 방문자: ${summary.uniqueVisitors.toLocaleString()}명`,
+        `- 재방문자: ${summary.returningVisitors.toLocaleString()}명 (재방문율 ${rate})`,
+        `- 만족도 평점: ${rating}`, '', '## 일자별 추이', '',
+        '| 날짜 | 페이지 조회수 | 순 방문자 | 재방문자 |', '| --- | ---: | ---: | ---: |',
+        ...(summary.daily.length ? summary.daily.map(row => `| ${row.date} | ${row.pageViews} | ${row.uniqueVisitors} | ${row.returningVisitors} |`) : ['| 집계 없음 | - | - | - |']),
+        '', '## 평점 분포', '', '| 평점 | 응답 수 |', '| --- | ---: |',
+        ...[5, 4, 3, 2, 1].map(score => `| ${score}점 | ${summary.ratingsByScore[score]} |`), '',
+        '## 해석 및 다음 달 제안', '',
+        '- 본 수치는 로그인 정보나 IP를 저장하지 않는 익명 베타 집계입니다. 학생 수가 아닌 브라우저 기준의 보수적 지표로 해석합니다.',
+        '- 재방문율과 평점을 함께 보며 공지 탐색, 마감일 표기, 배너와 안내 페이지 개선 우선순위를 정합니다.',
+        '- 다음 달에는 전월 보고서와 비교해 방문·재방문·평점의 증감과 주요 배포 변경 사항을 함께 기록합니다.', ''
+    ].join('\n');
+}
+
+app.post('/api/analytics/events', async (req, res) => {
+    try {
+        const eventType = String(req.body?.type || '');
+        const sessionId = String(req.body?.sessionId || '');
+        const rating = Number(req.body?.rating);
+        if (!ANALYTICS_EVENT_TYPES.has(eventType) || !/^[A-Za-z0-9_-]{24,128}$/.test(sessionId)) return res.status(400).json({ error: '유효하지 않은 분석 이벤트입니다.' });
+        if (eventType === 'rating' && (!Number.isInteger(rating) || rating < 1 || rating > 5)) return res.status(400).json({ error: '평점은 1~5점이어야 합니다.' });
+        const event = { event_type: eventType, session_hash: hashToken(sessionId), page_path: String(req.body?.pagePath || '/').slice(0, 160), rating: eventType === 'rating' ? rating : null, created_at: new Date().toISOString() };
+        if (useSupabase) { const { error } = await supabase.from('beta_analytics_events').insert(event); if (error) throw error; }
+        else { const events = await readAnalytics(); events.push(event); await writeAnalytics(events); }
+        res.status(201).json({ ok: true });
+    } catch (error) { res.status(500).json({ error: error.message || '분석 이벤트 저장에 실패했습니다.' }); }
+});
+
+app.get('/api/admin/beta-analytics', requireSuperAdmin, async (req, res) => {
+    try { res.json(buildBetaAnalyticsSummary(await readAnalytics(), String(req.query?.month || ''))); }
+    catch (error) { res.status(500).json({ error: error.message || '베타 분석 조회에 실패했습니다.' }); }
+});
+
+app.get('/api/admin/beta-report', requireSuperAdmin, async (req, res) => {
+    try {
+        const summary = buildBetaAnalyticsSummary(await readAnalytics(), String(req.query?.month || ''));
+        res.json({ filename: `snu-ece-beta-report-${summary.month}.md`, markdown: buildBetaReportMarkdown(summary), summary });
+    } catch (error) { res.status(500).json({ error: error.message || '베타 보고서 생성에 실패했습니다.' }); }
+});
+
 async function readFeedback() {
     try {
         const text = await fs.readFile(feedbackFilePath, 'utf-8');

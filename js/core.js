@@ -124,6 +124,78 @@ function buildApiUrl(path) {
     return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
 }
 
+// 베타 측정은 브라우저 난수 식별자만 쓰며, 서버에는 그 해시만 저장된다.
+function betaAnalyticsSessionId() {
+    let id = localStorage.getItem('eceBetaAnalyticsId');
+    if (!id) {
+        id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`).replace(/-/g, '');
+        localStorage.setItem('eceBetaAnalyticsId', id);
+    }
+    return id;
+}
+
+function trackBetaEvent(type, rating = null) {
+    const payload = JSON.stringify({
+        type,
+        rating,
+        sessionId: betaAnalyticsSessionId(),
+        pagePath: location.pathname
+    });
+    fetch(buildApiUrl('/api/analytics/events'), {
+        method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json' }, body: payload
+    }).catch(() => {});
+}
+
+function initializeBetaAnalytics() {
+    const visitedKey = 'eceBetaAnalyticsVisited';
+    const hasVisited = localStorage.getItem(visitedKey) === '1';
+    trackBetaEvent('page_view');
+    if (hasVisited) trackBetaEvent('return_visit');
+    localStorage.setItem(visitedKey, '1');
+}
+
+const BETA_NOTICE_OPEN_COUNT_KEY = 'eceBetaNoticeOpenCount';
+const BETA_RATING_PROMPTS_KEY = 'eceBetaRatingPrompts';
+const BETA_RATING_MILESTONES = [3, 13];
+
+function storedBetaRatingPrompts() {
+    try {
+        const values = JSON.parse(localStorage.getItem(BETA_RATING_PROMPTS_KEY) || '[]');
+        return Array.isArray(values) ? values.map(Number).filter(Number.isFinite) : [];
+    } catch {
+        return [];
+    }
+}
+
+function closeBetaRatingPrompt() {
+    closeModal('beta-rating-modal');
+}
+
+function submitBetaRating(score) {
+    const rating = Number(score);
+    if (rating >= 1 && rating <= 5) trackBetaEvent('rating', rating);
+    closeBetaRatingPrompt();
+}
+
+function recordBetaNoticeOpen() {
+    let count = Number(localStorage.getItem(BETA_NOTICE_OPEN_COUNT_KEY) || 0);
+    count = Number.isFinite(count) ? count + 1 : 1;
+    localStorage.setItem(BETA_NOTICE_OPEN_COUNT_KEY, String(count));
+    if (!BETA_RATING_MILESTONES.includes(count)) return;
+
+    const prompted = storedBetaRatingPrompts();
+    if (prompted.includes(count)) return;
+    prompted.push(count);
+    localStorage.setItem(BETA_RATING_PROMPTS_KEY, JSON.stringify(prompted));
+
+    const help = document.getElementById('beta-rating-help');
+    if (help) help.textContent = count === 3
+        ? '공지 3개를 열어본 시점의 평가를 남겨주세요. 익명으로 집계됩니다.'
+        : '공지를 13회 열어본 후의 평가를 남겨주세요. 이후에는 다시 묻지 않습니다.';
+    window.setTimeout(() => openModal('beta-rating-modal'), 450);
+}
+
 // ========================================
 // 🖥 뷰 모드 (데스크탑 / 모바일)
 // 레이아웃은 CSS가 data-view로 가르고, 동작 차이는 등록된 뷰 모듈이 맡는다.
@@ -271,6 +343,7 @@ function createNoticeViewportLoader(options) {
         image.addEventListener('error', () => {
             if (image.dataset.defaultFallbackApplied === 'true') return;
             image.dataset.defaultFallbackApplied = 'true';
+            image.closest?.('.card')?.classList.add('is-thumbnail-fallback');
             image.src = defaultUrl;
         });
         image.src = resolveUrl(pendingUrl);
@@ -1095,6 +1168,21 @@ function formatDetailMeta(dateLabel, views, registeredOn = '') {
     return parts.join(' &nbsp;|&nbsp; ');
 }
 
+function renderDetailDates(notice) {
+    const target = document.getElementById('detail-dates');
+    if (!target) return;
+    const registered = noticeRegisteredOn(notice);
+    const start = String(notice.startDate || '').slice(0, 10);
+    const deadline = String(notice.deadlineAt || notice.deadline || '').slice(0, 10);
+    const rows = [
+        registered && ['등록일', registered],
+        start && ['시행·접수 시작일', start],
+        deadline && ['마감일', deadline]
+    ].filter(Boolean);
+    target.hidden = rows.length === 0;
+    target.innerHTML = rows.map(([label, date]) => `<div><dt>${label}</dt><dd>${escapeHtml(formatDateWithWeekday(date))}</dd></div>`).join('');
+}
+
 /* 공지에 붙는 날짜.
 
    학생이 알고 싶은 것은 '언제 열려 있는가'다. 그래서 마감일이 있으면
@@ -1504,6 +1592,26 @@ function positionNoticeHoverPreview(card) {
     preview.style.width = `${previewWidth}px`;
 }
 
+function noticeHoverPreviewLines(notice) {
+    const summary = (Array.isArray(notice?.aiSummary) ? notice.aiSummary : [])
+        .flatMap(item => String(item || '').split(/\r?\n/))
+        .map(item => item.replace(/^\s*[-•·]\s*/, '').trim())
+        .filter(Boolean)
+        .slice(0, 3);
+    if (summary.length >= 3) return summary;
+
+    const sourceLabel = notice?.sourceUrl
+        ? '출처: 전기·정보공학부 홈페이지'
+        : `출처: ${String(notice?.host || '직접 등록 공지').trim()}`;
+    const attachmentLabel = Array.isArray(notice?.attachments) && notice.attachments.length > 0
+        ? '첨부파일이 있습니다.'
+        : '첨부파일이 없습니다.';
+
+    if (summary.length === 2) return [...summary, `${sourceLabel} · ${attachmentLabel}`];
+    if (summary.length === 1) return [...summary, sourceLabel, attachmentLabel];
+    return ['AI 요약이 아직 없습니다.', sourceLabel, attachmentLabel];
+}
+
 function renderNoticeHoverPreview(notice, card) {
     const preview = document.getElementById('notice-hover-preview');
     if (!preview || !notice || !card) return;
@@ -1511,13 +1619,10 @@ function renderNoticeHoverPreview(notice, card) {
         suspendNoticeHoverPreview();
         return;
     }
-    const summary = Array.isArray(notice.aiSummary) ? notice.aiSummary.filter(Boolean).slice(0, 3) : [];
-    const content = String(notice.content || '').replace(/\s+/g, ' ').trim();
-    const previewLines = summary.length ? summary : [content || '요약이 아직 없습니다.'];
+    const previewLines = noticeHoverPreviewLines(notice);
     preview.innerHTML = `
         <div class="notice-hover-preview-body">
             <span class="notice-hover-preview-label">AI 3줄 미리보기</span>
-            <h3>${escapeHtml(notice.title || '제목 없음')}</h3>
             <ul class="notice-hover-preview-summary-list">
                 ${previewLines.map(line => `<li>${escapeHtml(line)}</li>`).join('')}
             </ul>
@@ -1579,9 +1684,40 @@ function suspendNoticeHoverPreview() {
 
 function linkify(text) {
     if(!text) return "";
-    // 먼저 전체를 이스케이프하므로, 뒤이어 매칭되는 URL에는 따옴표가 남아 있지 않다.
-    const safeText = escapeHtml(text);
-    return safeText.replace(/(https?:\/\/[^\s<]+[^<.,:;"')\]\s])/g, `<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>`);
+    // 한국어 조사는 URL 문자가 아니다. 괄호 안의 링크라면 닫는 괄호도 링크에서 분리한다.
+    const rawText = String(text);
+    const urlPattern = /https?:\/\/[^\s<>"'\u3131-\u318e\uac00-\ud7a3]+/gi;
+    let html = '';
+    let cursor = 0;
+
+    for (const match of rawText.matchAll(urlPattern)) {
+        const matched = match[0];
+        let url = matched;
+        let suffix = '';
+
+        while (/[.,;:!?]$/.test(url)) {
+            suffix = url.slice(-1) + suffix;
+            url = url.slice(0, -1);
+        }
+
+        const bracketPairs = { ')': '(', ']': '[', '}': '{' };
+        while (bracketPairs[url.slice(-1)]) {
+            const closing = url.slice(-1);
+            const opening = bracketPairs[closing];
+            const openingCount = url.split(opening).length - 1;
+            const closingCount = url.split(closing).length - 1;
+            if (closingCount <= openingCount) break;
+            suffix = closing + suffix;
+            url = url.slice(0, -1);
+        }
+
+        html += escapeHtml(rawText.slice(cursor, match.index));
+        const safeUrl = escapeHtml(url);
+        html += `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>${escapeHtml(suffix)}`;
+        cursor = match.index + matched.length;
+    }
+
+    return html + escapeHtml(rawText.slice(cursor));
 }
 
 function safeHttpUrl(value) {
@@ -2404,8 +2540,9 @@ function renderNoticeCards(animate = false) {
             : '';
         // 본문 발췌: 목록 응답은 원문을 담지 않으므로 AI 3줄 요약을 발췌로 쓴다.
         const excerpt = Array.isArray(notice.aiSummary) ? notice.aiSummary.join(' ') : '';
-        // 이미지 카드만 본문 위에 제목을 다시 보여준다(텍스트 카드는 포스터가 곧 제목).
-        const titleHtml = hasImg ? `<h3 class="card-title">${safeTitle}</h3>` : '';
+        // 사진이 없어 포스터 안에 제목을 크게 쓴 카드도, 목록을 아래로 훑을 때
+        // 태그 다음에 제목을 놓쳐 버리지 않도록 본문 첫 줄에 한 번 더 적는다.
+        const titleHtml = `<h3 class="card-title">${safeTitle}</h3>`;
         const rewardText = notice.rewardNote || notice.surveyReward || '';
         // 리워드는 조회수와 같은 줄, 바로 왼쪽에 놓는다. 자리보다 길면
         // 렌더 후 measureCardRewardMarquee가 컨베이어처럼 흘려보낸다.
@@ -2817,6 +2954,7 @@ async function openDetail(idStr) {
         notice.views,
         noticeRegisteredOn(notice)
     );
+    renderDetailDates(notice);
     document.getElementById('detail-summary').innerHTML = (notice.aiSummary || []).map(item => `<li>${escapeHtml(item)}</li>`).join('');
     document.getElementById('detail-content').innerHTML = linkify(notice.content || "");
 
@@ -2864,6 +3002,7 @@ async function openDetail(idStr) {
 
     showDetailView();
     detailHistoryPushed = syncUrlToNotice(currentViewId);
+    recordBetaNoticeOpen();
 }
 
 function runNoticeSurfaceTransition(update, target) {
@@ -3937,6 +4076,7 @@ document.addEventListener('keydown', function(e) {
 document.addEventListener('DOMContentLoaded', async function () {
     if (document.body.dataset.page !== 'public') return;
 
+    initializeBetaAnalytics();
     updateLayoutToggleLabel();
     initializeResponsiveLayout();
     applyViewModule(getLayoutMode());

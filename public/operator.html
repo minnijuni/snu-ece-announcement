@@ -4,10 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#163f91">
+    <script>document.documentElement.dataset.view = matchMedia('(max-width: 820px)').matches ? 'mobile' : 'desktop';</script>
     <title>운영 주체 안내 | SNU ECE 공지방</title>
+    <link rel="stylesheet" href="./css/core.css">
+    <link rel="stylesheet" href="./css/desktop.css">
     <link rel="stylesheet" href="./css/service-guide.css">
 </head>
 <body>
+    <aside class="site-rail brand-rail rail-left guide-page-rail" id="guide-left-rail"></aside>
+    <aside class="site-rail ad-rail rail-right guide-page-rail" id="guide-right-rail"></aside>
     <main class="guide-shell">
         <a class="guide-back" href="./index.html"><span aria-hidden="true">‹</span>공지 목록</a>
         <p class="guide-kicker">ABOUT</p>
@@ -101,5 +106,7 @@
             <p>정보를 어떻게 다루는지는 <a href="./privacy.html">개인정보처리방침</a>에, 서비스 이용 조건과 면책 범위는 <a href="./terms.html">이용약관</a>에 정리했습니다. 서비스 자체의 동작 방식은 <a href="./service-guide.html">서비스 안내</a>를, 화면 사용법은 <a href="./guide.html">사용 설명서</a>를 참고해 주세요.</p>
         </section>
     </main>
+<script src="./js/config.js"></script>
+<script src="./js/guide-rails.js"></script>
 </body>
 </html>

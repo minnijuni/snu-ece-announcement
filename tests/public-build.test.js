@@ -283,7 +283,8 @@ test('mobile cards stay compact, keep paging, and disable notice comparison drag
 
     assert.doesNotMatch(html, /class="search-brand"/);
     assert.match(html, /class="detail-back"[^>]*aria-label="이전 화면"[\s\S]*<svg[\s\S]*<\/button>/);
-    assert.match(mobileCss, /\.card\s*\{[^}]*height:\s*auto;[^}]*aspect-ratio:\s*0\.72/s);
+    assert.match(mobileCss, /\.card\s*\{[^}]*min-height:\s*0/s);
+    assert.doesNotMatch(mobileCss, /\.card\s*\{[^}]*aspect-ratio:/s);
     assert.match(mobileCss, /\.card\s*\{[^}]*border-radius:\s*0;[^}]*box-shadow:/s);
     assert.match(mobileCss, /\.card\.card-urgent\s*\{[^}]*border:\s*2px solid #c0392b/s);
     assert.match(mobileCss, /\.card-img-preview\s*\{[^}]*object-fit:\s*cover/s);
@@ -815,10 +816,34 @@ test('manual Gemini analysis saves canonical category ids with the notice', asyn
     assert.match(admin, /categoryIds:\s*analysis\.categorySlugs/);
     assert.match(admin, /return withResolvedCategoryIds\(verified\)/);
     assert.match(admin, /verificationPrompt/);
+    assert.match(admin, /출력 형식:[\s\S]*?"deadline"[\s\S]*?"startDate"/);
+    assert.match(admin, /document\.getElementById\('post-start-date'\)\.value = parsed\.startDate \|\| ''/);
+    const save = readNamedFunction(admin, 'generateAIAndSave');
+    assert.match(save, /if \(!startDate && analysis\.startDate\)/);
+    assert.match(save, /startDate = analysis\.startDate/);
+    assert.match(save, /if \(!deadline && analysis\.deadline\)/);
     assert.match(admin, /verifiedNumbers/);
     assert.match(admin, /const newNoticeData = \{[\s\S]*categoryIds,/);
     assert.match(server, /const categoryIds = Array\.from\(new Set/);
     assert.match(schema, /notice_payload \? 'categoryIds'[\s\S]*insert into public\.notice_categories/);
+});
+
+test('explicit notice ranges supply start and deadline when Gemini omits them', async () => {
+    const admin = await readFile('js/admin.js', 'utf8');
+    const source = readNamedFunction(admin, 'extractExplicitNoticeDateRange');
+    const extract = new Function(`${source}; return extractExplicitNoticeDateRange;`)();
+
+    assert.deepEqual(
+        extract('2026학년도 2학기 수강신청 안내 (8/12 18:00 ~ 9/17 24:00)', new Date('2026-08-02T00:00:00')),
+        { startDate: '2026-08-12', deadline: '2026-09-17' }
+    );
+    assert.deepEqual(
+        extract('행사일은 8월 12일입니다.', new Date('2026-08-02T00:00:00')),
+        { startDate: '', deadline: '' }
+    );
+    const analysis = readNamedFunction(admin, 'runNoticeAnalysis');
+    assert.match(analysis, /if \(!draft\.startDate && explicitRange\.startDate\)/);
+    assert.match(analysis, /if \(!verified\.startDate && explicitRange\.startDate\)/);
 });
 
 test('the compose form picks an analysis mode instead of a verification checkbox', async () => {
@@ -942,12 +967,20 @@ test('admin AI work shows progress while login is isolated in a server-session p
 
     assert.match(html, /id="ai-progress-bar"/);
     assert.match(html, /id="ai-progress-percent"/);
-    for (const step of ['prepare', 'analyze', 'process', 'save']) {
+    for (const step of ['prepare', 'analyze', 'process']) {
         assert.match(html, new RegExp(`data-ai-step="${step}"`));
     }
+    assert.doesNotMatch(html, /data-ai-step="save"/);
     assert.match(admin, /beginAiProgress\('공지 원문을 준비하고 있습니다\.'/);
     assert.match(admin, /updateAiProgress\(18, 'Gemini가 원문을 분석하고 있습니다\.'/);
     assert.match(admin, /finishAiProgress\('Gemini 분석이 완료되었습니다\.'/);
+    const saveFlow = readNamedFunction(admin, 'generateAIAndSave');
+    assert.ok(
+        saveFlow.indexOf("finishAiProgress('Gemini 편집 결과가 모두 반영되었습니다.')")
+            < saveFlow.indexOf('compressNoticeImage'),
+        '100% 완료 시점은 이미지 처리·공지 저장보다 앞이어야 한다'
+    );
+    assert.doesNotMatch(saveFlow, /updateAiProgress\((84|95),/);
 
     assert.doesNotMatch(html, /id="admin-gate"|id="admin-gate-password"/);
     assert.match(loginHtml, /id="admin-login-password"[^>]*value=""/);
@@ -1321,12 +1354,23 @@ test('desktop notice cards expose a delayed hover preview without enabling it on
     assert.match(app, /\(hover: hover\) and \(pointer: fine\)/);
     assert.match(app, /\}, 620\);/);
     assert.match(app, /card\.addEventListener\('mouseenter'/);
-    assert.match(app, /const previewLines = summary\.length \? summary : \[content/);
+    assert.match(app, /function noticeHoverPreviewLines/);
     assert.match(app, /AI 3줄 미리보기/);
     assert.match(app, /notice-hover-preview-summary-list/);
+    assert.doesNotMatch(readNamedFunction(app, 'renderNoticeHoverPreview'), /<h3>/);
+    const context = {};
+    runInNewContext(`${readNamedFunction(app, 'noticeHoverPreviewLines')}; this.lines = noticeHoverPreviewLines;`, context);
+    assert.deepEqual(Array.from(context.lines({
+        aiSummary: ['요약 1', '요약 2'],
+        sourceUrl: 'https://ece.snu.ac.kr/notice',
+        attachments: [{ name: 'file.pdf' }]
+    })), ['요약 1', '요약 2', '출처: 전기·정보공학부 홈페이지 · 첨부파일이 있습니다.']);
+    assert.deepEqual(Array.from(context.lines({ aiSummary: [], host: '학생회', attachments: [] })),
+        ['AI 요약이 아직 없습니다.', '출처: 학생회', '첨부파일이 없습니다.']);
     assert.match(app, /right-ad-rail/);
     assert.match(css, /\.notice-hover-preview\s*\{[^}]*position:\s*fixed/s);
     assert.match(css, /\.notice-hover-preview-summary-list li\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
+    assert.match(css, /\.notice-hover-preview-summary-list\s*\{[^}]*color:\s*#111827;[^}]*font-size:\s*14px;[^}]*font-weight:\s*600/s);
     assert.match(mobileCss, /\.notice-hover-preview\s*\{\s*display:\s*none !important;/);
 });
 
@@ -1761,13 +1805,14 @@ test('notice detail supports inline image navigation, image copying, and a shado
     assert.deepEqual(result, { wrappedBack: 2, current: 1, updates: 3 });
 });
 
-test('notice cards are equal-height SNU-newsroom cards in the shared core layer', async () => {
+test('notice cards keep a baseline height but expand instead of clipping titles', async () => {
     const app = await readFile('js/core.js', 'utf8');
     const css = await readFile('css/core.css', 'utf8');
 
     assert.match(css, /\.grid\s*\{[^}]*display:\s*grid/s);
-    // 모든 카드가 같은 높이여야 블록 크기가 일정하다.
-    assert.match(css, /\.card\s*\{[^}]*height:\s*440px/s);
+    // 짧은 카드는 기준 높이를 유지하고 긴 제목이 오면 아래로 늘어난다.
+    assert.match(css, /\.card\s*\{[^}]*min-height:\s*440px;[^}]*height:\s*auto/s);
+    assert.match(css, /\.card-title\s*\{[^}]*display:\s*block;[^}]*overflow-wrap:\s*anywhere/s);
     // 포스터는 고정 높이, 사진은 cover.
     assert.match(css, /\.card-poster\s*\{[^}]*height:\s*216px/s);
     assert.match(css, /\.card-img-preview\s*\{[^}]*object-fit:\s*cover/s);
@@ -2082,7 +2127,7 @@ test('the admin console is usable on a phone and keeps AI editing in reach', asy
     }
 
     // 역할별로 열리는 탭이 코드에 못박혀 있다.
-    assert.match(admin, /master: \['review', 'backfill', 'compose', 'notices', 'banner', 'banner-inquiry', 'feedback', 'settings'\]/);
+    assert.match(admin, /master: \['review', 'backfill', 'compose', 'notices', 'banner', 'banner-inquiry', 'feedback', 'analytics', 'settings'\]/);
     assert.match(admin, /notice: \['review', 'backfill', 'compose', 'notices'\]/);
     assert.match(admin, /banner: \['banner', 'banner-inquiry'\]/);
     // 쓸 수 없는 탭은 감추는 게 아니라 지운다.
@@ -2499,4 +2544,90 @@ test('the legal pages name the same operators as the operator page', async () =>
 
     // 약관은 곳곳에서 '운영자'를 주어로 쓰므로 처음에 정의해야 한다.
     assert.match(terms, /이하 &ldquo;운영자&rdquo;/);
+});
+
+test('mobile guide pages hide desktop rails and mobile card titles stay contained', async () => {
+    const operator = await readFile('operator.html', 'utf8');
+    const guide = await readFile('service-guide.html', 'utf8');
+    const guideCss = await readFile('css/service-guide.css', 'utf8');
+    const mobileCss = await readFile('css/mobile.css', 'utf8');
+
+    for (const page of [operator, guide]) {
+        assert.doesNotMatch(page, /<html[^>]*data-view="desktop"/);
+        assert.match(page, /matchMedia\('\(max-width: 820px\)'\)/);
+    }
+    assert.match(guideCss, /@media \(max-width: 820px\)[\s\S]*?\.guide-page-rail\s*\{\s*display:\s*none !important;/);
+    assert.match(mobileCss, /\.card-poster\.is-text\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*154px/s);
+    assert.match(mobileCss, /\.card-poster-title\s*\{[^}]*overflow:\s*visible/s);
+    assert.match(mobileCss, /\.card-title\s*\{[^}]*word-break:\s*keep-all;[^}]*overflow-wrap:\s*anywhere;[^}]*display:\s*block;[^}]*overflow:\s*visible/s);
+    assert.match(mobileCss, /\.card-date\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere/s);
+});
+
+test('category selection uses one blue mobile baseline and a modest weight change', async () => {
+    const css = await readFile('css/core.css', 'utf8');
+    const mobile = await readFile('css/mobile.css', 'utf8');
+
+    assert.match(css, /\.category-tab\.active\s*\{[^}]*font-weight:\s*750/s);
+    assert.match(mobile, /\.category-tabs\s*\{[^}]*border-bottom:\s*2px solid var\(--primary-deep\)/s);
+    assert.match(mobile, /\.category-tab\.active\s*\{[^}]*border-bottom-color:\s*transparent;[^}]*font-weight:\s*750/s);
+});
+
+test('notice links stop before Korean particles and surrounding punctuation', async () => {
+    const app = await readFile('js/core.js', 'utf8');
+    const context = {};
+    runInNewContext(`
+        ${readNamedFunction(app, 'escapeHtml')}
+        ${readNamedFunction(app, 'linkify')}
+        this.linkify = linkify;
+    `, context);
+
+    const linked = context.linkify('신청(https://forms.gle/JTkSYXtCVNE5zELt5)는 SNU 포털에서 확인.');
+    assert.match(linked, /href="https:\/\/forms\.gle\/JTkSYXtCVNE5zELt5"/);
+    assert.match(linked, /<\/a>\)는 SNU/);
+    assert.doesNotMatch(linked, /href="[^"]*\)는/);
+
+    const balanced = context.linkify('https://example.com/docs_(v2).');
+    assert.match(balanced, /href="https:\/\/example\.com\/docs_\(v2\)"/);
+    assert.match(balanced, /<\/a>\.$/);
+
+    const quoted = context.linkify('"https://example.com/apply" <안내>');
+    assert.match(quoted, /^&quot;<a href="https:\/\/example\.com\/apply"/);
+    assert.match(quoted, /<\/a>&quot; &lt;안내&gt;$/);
+});
+
+test('service guide sections and footer tutorial targets have clear boundaries', async () => {
+    const guide = await readFile('service-guide.html', 'utf8');
+    const html = await readFile('index.html', 'utf8');
+    const tutorial = await readFile('js/tutorial.js', 'utf8');
+    const css = await readFile('css/core.css', 'utf8');
+
+    assert.match(guide, /class="guide-category-sort"[\s\S]*?<\/section>\s*<section>\s*<h2>관련 공지<\/h2>/);
+    assert.match(html, /class="footer-link-list footer-tutorial-links"/);
+    assert.match(html, /class="footer-sync-content"/);
+    assert.match(tutorial, /target:\s*'\.footer-column\[aria-label="문의"\] \.footer-tutorial-links'/);
+    assert.match(tutorial, /target:\s*'#footer-sync \.footer-sync-content'/);
+    assert.match(css, /\.footer-tutorial-links\s*\{[^}]*width:\s*max-content[^}]*padding:\s*4px 8px/);
+    assert.match(css, /\.footer-sync-content\s*\{[^}]*display:\s*inline-flex[^}]*padding:\s*5px 8px/);
+});
+
+test('beta ratings appear only after the third and thirteenth notice opens', async () => {
+    const html = await readFile('index.html', 'utf8');
+    const app = await readFile('js/core.js', 'utf8');
+
+    const feedbackModal = html.slice(
+        html.indexOf('id="contact-modal"'),
+        html.indexOf('id="beta-rating-modal"')
+    );
+    assert.doesNotMatch(feedbackModal, /베타 서비스는 어떠셨나요|beta-rating-buttons/);
+    assert.match(html, /id="beta-rating-modal"/);
+    assert.match(app, /BETA_RATING_MILESTONES = \[3, 13\]/);
+    assert.match(readNamedFunction(app, 'recordBetaNoticeOpen'), /BETA_RATING_MILESTONES\.includes\(count\)/);
+    assert.match(readNamedFunction(app, 'recordBetaNoticeOpen'), /prompted\.includes\(count\)/);
+    assert.match(readNamedFunction(app, 'openDetail'), /recordBetaNoticeOpen\(\)/);
+    assert.doesNotMatch(readNamedFunction(app, 'submitFeedback'), /rating|beta-rating/);
+});
+
+test('admin role radios do not inherit the rectangular text-input chrome', async () => {
+    const css = await readFile('css/admin-login.css', 'utf8');
+    assert.match(css, /\.role-option input\s*\{[^}]*min-height:\s*0;[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s);
 });

@@ -256,7 +256,7 @@
 .ai-progress-steps {
     width: min(520px, 100%);
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 8px;
     margin: 0 auto;
     padding: 0;
@@ -796,6 +796,17 @@
 /* 상단 막대의 워드마크. 남색 위에 얹히는 흰색 판이다. */
 .admin-topbar h1 { display: flex; align-items: center; }
 .admin-topbar-mark { display: block; width: auto; height: 26px; -webkit-user-drag: none; }
+.analytics-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.analytics-toolbar input { min-height: 36px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.analytics-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.analytics-metrics article { padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: #fff; }
+.analytics-metrics span { display: block; color: var(--text-sub); font-size: 12px; font-weight: 700; }
+.analytics-metrics strong { display: block; margin-top: 7px; color: var(--text-main); font-size: 17px; }
+.analytics-daily { overflow-x: auto; }
+.analytics-daily table { width: 100%; border-collapse: collapse; background: #fff; font-size: 13px; }
+.analytics-daily th, .analytics-daily td { padding: 10px; border-bottom: 1px solid var(--border); text-align: right; }
+.analytics-daily th:first-child, .analytics-daily td:first-child { text-align: left; }
 @media (max-width: 760px) {
     .admin-topbar-mark { height: 21px; }
+    .analytics-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

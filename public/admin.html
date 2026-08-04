@@ -72,6 +72,7 @@
             <button type="button" class="admin-tab" data-tab="feedback" onclick="selectAdminTab('feedback')">
                 문의함 <span class="tab-count" id="feedback-count" hidden>0</span>
             </button>
+            <button type="button" class="admin-tab" data-tab="analytics" onclick="selectAdminTab('analytics')">베타 분석</button>
             <button type="button" class="admin-tab" data-tab="settings" onclick="selectAdminTab('settings')">관리자 설정</button>
         </nav>
 
@@ -143,7 +144,6 @@
                     <li data-ai-step="prepare">원문 준비</li>
                     <li data-ai-step="analyze">Gemini 분석</li>
                     <li data-ai-step="process">결과 정리</li>
-                    <li data-ai-step="save">반영·저장</li>
                 </ol>
             </div>
 
@@ -366,6 +366,20 @@
         </section>
 
         <!-- ============ 관리자 설정 ============ -->
+        <section class="admin-panel" id="panel-analytics" aria-labelledby="panel-analytics-title">
+            <h2 id="panel-analytics-title">베타 분석 및 월간 보고서</h2>
+            <p class="review-auto-note">IP·이름·연락처를 저장하지 않는 익명 집계입니다. 방문자 수는 브라우저 기준으로 해석하세요.</p>
+            <div class="analytics-toolbar">
+                <label for="analytics-month">대상 월</label>
+                <input type="month" id="analytics-month">
+                <button class="btn btn-outline btn-small" type="button" onclick="loadBetaAnalytics()">조회</button>
+                <button class="btn btn-small" type="button" onclick="downloadBetaReport()">월간 보고서 .md</button>
+            </div>
+            <p class="review-status" id="analytics-status" aria-live="polite"></p>
+            <div class="analytics-metrics" id="analytics-metrics"></div>
+            <div class="analytics-daily" id="analytics-daily"></div>
+        </section>
+
         <section class="admin-panel" id="panel-settings" aria-labelledby="panel-settings-title">
             <h2 id="panel-settings-title">관리자 설정</h2>
             <!-- 마스터로 로그인해야만 이 탭 자체가 만들어지므로 추가 인증이 없다. -->

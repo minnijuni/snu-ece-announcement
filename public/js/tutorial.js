@@ -15,7 +15,7 @@
     'use strict';
 
     const TUTORIAL_SEEN_KEY = 'eceTutorialSeen';
-    const RING_PADDING = 8;
+    const RING_PADDING = 0;
     const CARD_GAP = 14;
     const EDGE = 12;
     const MOVE_MIN_MS = 300;
@@ -24,7 +24,7 @@
     /* hint를 적으면 카드 아래에 한 줄 덧붙는다. */
     const STEPS = [
         {
-            target: '.search-container',
+            target: '.search-field',
             title: '검색으로 시작하세요',
             body: '제목과 본문을 함께 찾습니다. 글자를 입력하는 즉시 아래 목록이 걸러지니 검색 버튼을 따로 누를 필요는 없습니다.',
             hint: '안내를 보는 동안에는 화면이 잠깁니다'
@@ -90,12 +90,12 @@
             body: '학생 단체와 학내 행사 홍보가 도는 자리입니다. 검수를 거친 항목만 정해진 기간 동안 걸립니다.'
         },
         {
-            target: '.footer-column[aria-label="문의"]',
+            target: '.footer-column[aria-label="문의"] .footer-tutorial-links',
             title: '문의와 홍보 신청',
             body: '개선 의견은 익명으로 보낼 수 있고, 홍보 신청은 양식을 내면 검수 뒤 배너로 올라갑니다. 자주 묻는 질문도 여기 있습니다.'
         },
         {
-            target: '#footer-sync',
+            target: '#footer-sync .footer-sync-content',
             title: '언제 가져온 공지인지',
             body: '마지막으로 학부 홈페이지에서 공지를 가져온 시각입니다. 원문이 방금 올라왔다면 여기 시각 이후에 반영됩니다.'
         },
@@ -239,14 +239,17 @@
         const clampV = value => Math.min(Math.max(EDGE, value), Math.max(EDGE, vh - ch - EDGE));
         const clampH = value => Math.min(Math.max(EDGE, value), Math.max(EDGE, vw - cw - EDGE));
         const middle = clampH(rect.left + rect.width / 2 - cw / 2);
+        // 검색창처럼 설명 상자보다 넓은 대상은 가운데에 띄우기보다 왼쪽 선을
+        // 맞추는 편이 대상과 설명의 관계가 반듯하게 보인다.
+        const stackedLeft = rect.width >= cw ? clampH(rect.left) : middle;
 
         const beside = [];
         if (rect.right + CARD_GAP + cw + EDGE <= vw) beside.push({ left: rect.right + CARD_GAP, top: clampV(rect.top) });
         if (rect.left - CARD_GAP - cw - EDGE >= 0) beside.push({ left: rect.left - CARD_GAP - cw, top: clampV(rect.top) });
 
         const stacked = [];
-        if (rect.bottom + CARD_GAP + ch + EDGE <= vh) stacked.push({ top: rect.bottom + CARD_GAP, left: middle });
-        if (rect.top - CARD_GAP - ch - EDGE >= 0) stacked.push({ top: rect.top - CARD_GAP - ch, left: middle });
+        if (rect.bottom + CARD_GAP + ch + EDGE <= vh) stacked.push({ top: rect.bottom + CARD_GAP, left: stackedLeft });
+        if (rect.top - CARD_GAP - ch - EDGE >= 0) stacked.push({ top: rect.top - CARD_GAP - ch, left: stackedLeft });
 
         // 세로로 긴 표적은 옆에 세우는 편이 낫다. 넓적한 것은 아래위가 자연스럽다.
         const tall = rect.height > vh * 0.4;
@@ -280,10 +283,10 @@
        자르는 일은 실제로 그릴 때 한 번만 한다. */
     function holeAround(rect) {
         return {
-            top: rect.top - RING_PADDING,
-            left: rect.left - RING_PADDING,
-            right: rect.right + RING_PADDING,
-            bottom: rect.bottom + RING_PADDING
+            top: Math.max(4, rect.top - RING_PADDING),
+            left: Math.max(4, rect.left - RING_PADDING),
+            right: Math.min(window.innerWidth - 4, rect.right + RING_PADDING),
+            bottom: Math.min(window.innerHeight - 4, rect.bottom + RING_PADDING)
         };
     }
 
@@ -467,6 +470,7 @@
 
         if (leaveStep) { leaveStep(); leaveStep = null; }
         currentTarget = step.final ? null : resolveTarget(step) || null;
+        layer.classList.toggle('has-target', Boolean(currentTarget));
         if (currentTarget && typeof step.onEnter === 'function') {
             leaveStep = step.onEnter(currentTarget) || null;
         }

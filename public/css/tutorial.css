@@ -27,13 +27,18 @@
 }
 
 .tutorial-layer.is-open .tutorial-shade { opacity: 1; }
+.tutorial-layer.is-open.has-target .tutorial-shade { opacity: 0; }
 
 /* 구멍 테두리. 클릭을 가로채면 안 되므로 보이기만 한다. */
 .tutorial-ring {
     position: fixed;
+    box-sizing: border-box;
+    max-width: calc(100vw - 8px);
+    max-height: calc(100vh - 8px);
+    overflow: hidden;
     border-radius: 14px;
     pointer-events: none;
-    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 6px rgba(90, 140, 255, 0.35);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 6px rgba(90, 140, 255, 0.35), 0 0 0 9999px rgba(9, 13, 26, 0.82);
     opacity: 0;
     /* 자리도 진하기도 자바스크립트가 매 프레임 직접 그린다. 여기서 전환을
        걸어 두면 프레임마다 새 전환이 시작돼 한 박자씩 늦게 따라온다. */
@@ -45,8 +50,8 @@
 .tutorial-ring { animation: tutorial-pulse 2.4s ease-in-out infinite; }
 
 @keyframes tutorial-pulse {
-    0%, 100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 6px rgba(90, 140, 255, 0.32); }
-    50%      { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.98), 0 0 0 13px rgba(90, 140, 255, 0.16); }
+    0%, 100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.92), 0 0 0 6px rgba(90, 140, 255, 0.32), 0 0 0 9999px rgba(9, 13, 26, 0.82); }
+    50%      { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.98), 0 0 0 10px rgba(90, 140, 255, 0.16), 0 0 0 9999px rgba(9, 13, 26, 0.82); }
 }
 
 .tutorial-card {

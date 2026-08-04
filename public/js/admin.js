@@ -37,7 +37,7 @@ let kakaoBackfillDrafts = [];
 
 // 제목 양식에서 쓰는 유형 목록. 편집할 때 기존 제목을 되돌려 읽는 데에도 쓴다.
 const TITLE_KINDS = ['모집', '안내', '신청', '접수', '공지', '행사', '변경 안내', '결과 발표', '기간 연장', '설문', '제휴'];
-const AI_PROGRESS_STEPS = ['prepare', 'analyze', 'process', 'save'];
+const AI_PROGRESS_STEPS = ['prepare', 'analyze', 'process'];
 
 function setAiProgress(value, status, activeStep = null, ceiling = value) {
     aiProgressValue = Math.max(aiProgressValue, Math.min(100, Math.round(value)));
@@ -82,7 +82,7 @@ function updateAiProgress(value, status, activeStep, ceiling = value + 12) {
 function finishAiProgress(status = '작업이 완료되었습니다.') {
     if (aiProgressTimer) clearInterval(aiProgressTimer);
     aiProgressTimer = null;
-    setAiProgress(100, status, 'save', 100);
+    setAiProgress(100, status, 'process', 100);
     document.querySelectorAll('[data-ai-step]').forEach(item => {
         item.classList.remove('active');
         item.classList.add('done');
@@ -127,7 +127,7 @@ async function showGeminiRetryCountdown(error) {
 /* 역할별로 열리는 탭.
    마스터는 전부, 공지 관리자는 공지 관련 셋, 배너 관리자는 배너만 본다. */
 const ADMIN_TABS_BY_ROLE = Object.freeze({
-    master: ['review', 'backfill', 'compose', 'notices', 'banner', 'banner-inquiry', 'feedback', 'settings'],
+    master: ['review', 'backfill', 'compose', 'notices', 'banner', 'banner-inquiry', 'feedback', 'analytics', 'settings'],
     notice: ['review', 'backfill', 'compose', 'notices'],
     banner: ['banner', 'banner-inquiry']
 });
@@ -234,6 +234,7 @@ function selectAdminTab(name) {
     if (name === 'notices') loadAdminNoticeList();
     if (name === 'feedback') loadAdminFeedback();
     if (name === 'banner-inquiry') loadAdminFeedback();
+    if (name === 'analytics') loadBetaAnalytics();
     // 로그인할 때 이미 신분을 확인했으므로 배너·설정에서 비밀번호를 다시 묻지 않는다.
     if (name === 'banner') unlockBannerPanel();
     if (name === 'settings') unlockSettingsPanel();
@@ -662,6 +663,35 @@ const NOTICE_ANALYSIS_CATEGORY_SLUGS = new Set([
     'academic', 'opportunity', 'survey', 'community'
 ]);
 
+// Gemini가 명시된 기간의 앞 날짜를 빠뜨리는 경우를 막는 교차 확인 장치.
+// 한 날짜만 등장하는 공지는 시작/마감 의미를 단정하지 않고, '~' 또는 '부터'로
+// 연결된 두 날짜가 있을 때만 사용한다. 연도가 생략되면 공지의 '학년도/년도'를
+// 우선하고, 그것도 없을 때만 현재 연도를 쓴다.
+function extractExplicitNoticeDateRange(content, referenceDate = new Date()) {
+    const text = String(content || '').replace(/\s+/g, ' ');
+    const statedYear = Number(text.match(/\b(20\d{2})\s*(?:학년도|년도|년)/)?.[1]);
+    const fallbackYear = statedYear || referenceDate.getFullYear();
+    const datePart = '(?:(20\\d{2})\\s*(?:년|[.\\/-])\\s*)?(\\d{1,2})\\s*(?:월|[.\\/-])\\s*(\\d{1,2})\\s*일?';
+    const timePart = '(?:\\s*(?:\\([^)]*\\)\\s*)?(?:오전|오후)?\\s*\\d{1,2}(?::\\d{2})?\\s*(?:시|분)?)?';
+    const match = text.match(new RegExp(`${datePart}${timePart}\\s*(?:~|∼|～|–|—|부터)\\s*${datePart}`, 'i'));
+    if (!match) return { startDate: '', deadline: '' };
+
+    const startMonth = Number(match[2]);
+    const startDay = Number(match[3]);
+    const endMonth = Number(match[5]);
+    const endDay = Number(match[6]);
+    const startYear = Number(match[1]) || fallbackYear;
+    const endYear = Number(match[4]) || (endMonth < startMonth ? startYear + 1 : startYear);
+    const toIsoDate = (year, month, day) => {
+        const date = new Date(Date.UTC(year, month - 1, day));
+        if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
+        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    };
+    const startDate = toIsoDate(startYear, startMonth, startDay);
+    const deadline = toIsoDate(endYear, endMonth, endDay);
+    return startDate && deadline ? { startDate, deadline } : { startDate: '', deadline: '' };
+}
+
 function normalizeNoticeAnalysisResult(parsed = {}) {
     const categorySlugs = Array.isArray(parsed.categorySlugs)
         ? Array.from(new Set(parsed.categorySlugs
@@ -745,10 +775,6 @@ function buildSummaryOnlyPrompt(content) {
     return `다음 공지 원문을 읽고 JSON만 출력해. 코드블록·설명 없이 JSON 객체 하나만.
 형식: {"summary":["요약1","요약2","요약3"],"categorySlugs":["academic|opportunity|survey|community 중 핵심 하나"],"hasReward":false,"rewardNote":null,"requiresAction":false}
 - summary는 각 줄 명사형 종결의 3줄 요약.
-- deadline은 신청·제출이 끝나는 날. startDate는 행사가 열리는 날 또는 접수를 받기
-  시작하는 날. 원문에 "7월 20일 ~ 9월 15일"처럼 기간이 있으면 앞이 startDate,
-  뒤가 deadline. 하루짜리 행사는 startDate만 채우고 deadline은 비움.
-  근거가 없으면 지어내지 말고 빈 문자열.
 - 사진 없는 카드에서 2~3줄로 자연스럽게 나뉘도록, 긴 한 덩어리 대신 의미가 분명한 짧은 어절 묶음으로 작성.
 - 격식적인 보도자료 문체보다 학생이 빠르게 읽는 자연스럽고 캐주얼한 표현을 사용.
 - 물음표 반복, 깨진 문자, 불완전한 조사, 같은 단어 반복을 절대 포함하지 말 것. 원문 글자가 깨졌다면 문맥상 확실한 내용만 한국어로 복원.
@@ -773,6 +799,8 @@ async function runNoticeAnalysis(content, onVerificationStart = null) {
     const prompt = `다음 공지 원문을 분석해서 JSON만 출력해. 코드블록·설명 없이 JSON 객체 하나만.
 형식: {"deadline":"YYYY-MM-DD 또는 빈문자열","startDate":"YYYY-MM-DD 또는 빈문자열","subject":"포스터용 핵심 문구 10~28자","type":"${TITLE_KINDS.join('|')} 중 하나","summary":["요약1","요약2","요약3"],"categorySlugs":["academic|opportunity|survey|community 중 핵심 하나"],"hasReward":false,"rewardNote":null,"requiresAction":false}
 - 오늘 날짜는 ${today}. 마감일이 원문에 없거나 불명확하면 deadline은 빈문자열.
+- startDate는 접수·신청·수강신청·행사의 실제 시작일입니다. "8/12 18:00 ~ 9/17 24:00"처럼 기간이 명시되면 연도를 문맥과 오늘 날짜로 확정해 앞 날짜를 startDate, 뒤 날짜를 deadline에 반드시 넣습니다.
+- 게시일·작성일을 startDate로 쓰지 않습니다. 시작일의 근거가 원문에 없을 때만 빈 문자열로 둡니다.
 - type은 반드시 제시한 보기 중 하나.
 - subject에는 유형 단어(${TITLE_KINDS.join(', ')})를 넣지 말고 핵심 명사구만. 예: "개강총회 참가자".
 - 사진 없는 카드에서 2~3줄로 자연스럽게 나뉘도록, 긴 한 덩어리 대신 의미가 분명한 짧은 어절 묶음으로 작성.
@@ -798,7 +826,10 @@ ${content}`;
             model: GEMINI_MODEL
         })
     });
+    const explicitRange = extractExplicitNoticeDateRange(content, new Date(`${today}T00:00:00`));
     const draft = normalizeNoticeAnalysisResult(parseAnalysisJson(result?.text || ''));
+    if (!draft.startDate && explicitRange.startDate) draft.startDate = explicitRange.startDate;
+    if (!draft.deadline && explicitRange.deadline) draft.deadline = explicitRange.deadline;
     // 2차 검수는 full-verified에서만 돈다. 나머지 모드는 여기서 끝난다.
     if (mode !== 'full-verified') return withResolvedCategoryIds(draft);
     if (typeof onVerificationStart === 'function') onVerificationStart();
@@ -810,14 +841,14 @@ ${content}`;
 반드시 확인할 항목:
 1. 날짜, 시각, 금액, 인원, 학점, 학기, 기간, 횟수, 비율, 연락처 등 주요 수치를 원문 그대로 대조합니다.
 2. 원문에 없는 수치나 조건이 summary에 추가됐으면 삭제하거나 바로잡습니다.
-3. deadline은 실제 신청/제출 마감일일 때만 YYYY-MM-DD로 적고 불명확하면 빈 문자열입니다.
+3. startDate는 접수·신청·수강신청·행사의 시작일, deadline은 실제 신청·제출 마감일입니다. 원문에 기간이 있으면 앞 날짜와 뒤 날짜를 각각 YYYY-MM-DD로 반드시 대조합니다. 게시일은 startDate가 아닙니다.
 4. categorySlugs는 academic/opportunity/survey/community 중 핵심 하나만 고릅니다.
    기회와 설문은 선발이 있느냐로 가릅니다. 붙고 떨어지는 일이 있으면 기회,
    조건만 맞으면 참여로 끝나면 설문입니다.
 5. 신청·제출·응답은 requiresAction, 상품·지원·할인은 hasReward와 rewardNote로 다시 검증합니다.
 
 출력 형식:
-{"deadline":"YYYY-MM-DD 또는 빈 문자열","subject":"핵심 명사구","type":"${TITLE_KINDS.join('|')} 중 하나","summary":["정확한 요약1","정확한 요약2","정확한 요약3"],"categorySlugs":["핵심 slug 하나"],"hasReward":false,"rewardNote":null,"requiresAction":false,"verifiedNumbers":["원문에서 대조한 주요 수치"],"verificationWarnings":["불명확하거나 관리자 확인이 필요한 점"]}
+{"deadline":"YYYY-MM-DD 또는 빈 문자열","startDate":"YYYY-MM-DD 또는 빈 문자열","subject":"핵심 명사구","type":"${TITLE_KINDS.join('|')} 중 하나","summary":["정확한 요약1","정확한 요약2","정확한 요약3"],"categorySlugs":["핵심 slug 하나"],"hasReward":false,"rewardNote":null,"requiresAction":false,"verifiedNumbers":["원문에서 대조한 주요 수치"],"verificationWarnings":["불명확하거나 관리자 확인이 필요한 점"]}
 
 원문:
 ${content}
@@ -831,6 +862,8 @@ ${JSON.stringify(draft)}`;
         body: JSON.stringify({ prompt: verificationPrompt, model: GEMINI_MODEL })
     });
     const verified = normalizeNoticeAnalysisResult(parseAnalysisJson(verificationResult?.text || ''));
+    if (!verified.startDate && explicitRange.startDate) verified.startDate = explicitRange.startDate;
+    if (!verified.deadline && explicitRange.deadline) verified.deadline = explicitRange.deadline;
     if (!verified.subject && !verified.type && verified.summary.length === 0) {
         throw new Error('2차 검수 결과를 해석하지 못했습니다. 다시 분석해주세요.');
     }
@@ -867,6 +900,7 @@ async function analyzeNotice() {
         if (mode !== 'summary') {
             if (parsed.subject) document.getElementById('title-subject').value = parsed.subject;
             if (parsed.type) document.getElementById('title-kind').value = parsed.type;
+            document.getElementById('post-start-date').value = parsed.startDate || '';
             aiDeadlineCandidate = parsed.deadline || '';
             renderAiDeadlineCandidate();
         }
@@ -885,7 +919,7 @@ async function analyzeNotice() {
         // 모드마다 성공의 기준이 다르다. summary는 요약이 나왔으면 성공이다.
         const gotSomething = mode === 'summary'
             ? parsed.summary.length > 0
-            : (parsed.subject || parsed.type || parsed.deadline);
+            : (parsed.subject || parsed.type || parsed.startDate || parsed.deadline);
         // 하지 않은 교차 검증을 했다고 말하지 않는다.
         const doneLabel = {
             'full-verified': `AI 2단계 분석 완료.${parsed.verifiedNumbers.length
@@ -916,6 +950,54 @@ async function analyzeNotice() {
 // ========================================
 // 💬 익명 피드백 (관리자 열람)
 // ========================================
+
+function analyticsMonthValue() {
+    const input = document.getElementById('analytics-month');
+    if (input && !input.value) input.value = new Date().toISOString().slice(0, 7);
+    return input?.value || new Date().toISOString().slice(0, 7);
+}
+
+function renderBetaAnalytics(summary) {
+    const metrics = document.getElementById('analytics-metrics');
+    const daily = document.getElementById('analytics-daily');
+    if (!metrics || !daily) return;
+    const rate = summary.returnRate === null ? '-' : `${summary.returnRate}%`;
+    const rating = summary.averageRating === null ? '-' : `${summary.averageRating} / 5`;
+    metrics.innerHTML = [
+        ['페이지 조회수', `${Number(summary.pageViews || 0).toLocaleString()}회`],
+        ['순 방문자', `${Number(summary.uniqueVisitors || 0).toLocaleString()}명`],
+        ['재방문자', `${Number(summary.returningVisitors || 0).toLocaleString()}명 (${rate})`],
+        ['만족도 평점', `${rating} · ${Number(summary.ratingCount || 0)}건`]
+    ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join('');
+    const rows = Array.isArray(summary.daily) ? summary.daily : [];
+    daily.innerHTML = rows.length ? `<table><thead><tr><th>날짜</th><th>조회수</th><th>순 방문자</th><th>재방문자</th></tr></thead><tbody>${rows.map(row => `<tr><td>${escapeHtml(row.date)}</td><td>${Number(row.pageViews)}</td><td>${Number(row.uniqueVisitors)}</td><td>${Number(row.returningVisitors)}</td></tr>`).join('')}</tbody></table>` : '<div class="review-empty">선택한 달의 집계가 아직 없습니다.</div>';
+}
+
+async function loadBetaAnalytics() {
+    const status = document.getElementById('analytics-status');
+    if (status) status.textContent = '집계 정보를 불러오는 중입니다.';
+    try {
+        const summary = await apiRequest(`/api/admin/beta-analytics?month=${encodeURIComponent(analyticsMonthValue())}`, { headers: getSuperAdminHeaders() });
+        renderBetaAnalytics(summary);
+        if (status) { status.textContent = `${summary.month} 익명 베타 집계`; status.style.color = 'var(--text-sub)'; }
+    } catch (error) {
+        if (status) { status.textContent = error.message || '집계를 불러오지 못했습니다.'; status.style.color = 'var(--danger)'; }
+    }
+}
+
+async function downloadBetaReport() {
+    const status = document.getElementById('analytics-status');
+    try {
+        const report = await apiRequest(`/api/admin/beta-report?month=${encodeURIComponent(analyticsMonthValue())}`, { headers: getSuperAdminHeaders() });
+        const url = URL.createObjectURL(new Blob([report.markdown], { type: 'text/markdown;charset=utf-8' }));
+        const link = document.createElement('a');
+        link.href = url; link.download = report.filename; link.click();
+        URL.revokeObjectURL(url);
+        if (status) { status.textContent = `${report.filename} 다운로드를 시작했습니다.`; status.style.color = 'var(--ok)'; }
+    } catch (error) {
+        if (status) { status.textContent = error.message || '보고서 생성에 실패했습니다.'; status.style.color = 'var(--danger)'; }
+    }
+}
 
 async function loadAdminFeedback() {
     const list = document.getElementById('admin-feedback-list');
@@ -1326,8 +1408,8 @@ async function generateAIAndSave() {
     const target = document.getElementById('post-target').value;
     // 주관 기관은 제목 양식에서 고른 값을 그대로 쓴다. 따로 입력받지 않는다.
     const host = (isTitleManual() ? '' : getSelectedTitleHost()) || '기타';
-    const deadline = document.getElementById('post-deadline').value;
-    const startDate = document.getElementById('post-start-date').value;
+    let deadline = document.getElementById('post-deadline').value;
+    let startDate = document.getElementById('post-start-date').value;
     const isAlwaysOpen = document.getElementById('post-always-open').checked;
     const isPinned = document.getElementById('post-pinned').checked;
     const content = document.getElementById('post-content').value.trim();
@@ -1380,6 +1462,17 @@ async function generateAIAndSave() {
                 surveyReward = analysis.surveyReward;
                 hasReward = analysis.hasReward;
                 requiresAction = analysis.requiresAction;
+                // 저장 버튼에서 처음 Gemini 편집이 실행된 경우에도 분석 날짜가
+                // 폼과 저장 payload에서 유실되지 않게 한다. 관리자가 이미 입력한
+                // 날짜는 보존하고 비어 있는 값만 AI 결과로 보충한다.
+                if (!startDate && analysis.startDate) {
+                    startDate = analysis.startDate;
+                    document.getElementById('post-start-date').value = startDate;
+                }
+                if (!deadline && analysis.deadline) {
+                    deadline = analysis.deadline;
+                    document.getElementById('post-deadline').value = deadline;
+                }
             } catch (error) {
                 // 분석은 부가 정보일 뿐이므로 실패해도 공지 저장 자체는 막지 않는다.
                 // 할당량 초과는 일시적인데 이걸로 작성한 내용을 통째로 잃으면 안 된다.
@@ -1402,7 +1495,15 @@ async function generateAIAndSave() {
             requiresAction = existing.requiresAction === true;
         }
 
-        updateAiProgress(68, '첨부 이미지를 정리하고 있습니다.', 'process', 82);
+        if (analysisFailure) {
+            updateAiProgress(98, 'Gemini 편집을 완료하지 못했습니다. 기존 내용으로 저장을 계속합니다.', 'process', 98);
+            document.getElementById('ai-progress-heading').textContent = 'Gemini 편집 미완료';
+        } else {
+            finishAiProgress('Gemini 편집 결과가 모두 반영되었습니다.');
+            document.getElementById('ai-progress-heading').textContent = 'Gemini 편집 완료';
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+        document.getElementById('ai-progress-status').textContent = '첨부 이미지를 정리하고 있습니다.';
         // 붙여넣은 이미지 → 파일 첨부 순으로 합치고 최대 20장으로 자른다.
         for (const src of pastedImages) {
             if (finalImages.length >= MAX_NOTICE_IMAGES) break;
@@ -1436,7 +1537,7 @@ async function generateAIAndSave() {
             categoryIds,
             images: finalImages
         };
-        updateAiProgress(84, '공지 내용을 서버에 저장하고 있습니다.', 'save', 94);
+        document.getElementById('ai-progress-status').textContent = '공지 내용을 서버에 저장하고 있습니다.';
         if (editingNoticeId) {
             await apiRequest(`/api/notices/${editingNoticeId}`, {
                 method: 'PUT',
@@ -1450,10 +1551,8 @@ async function generateAIAndSave() {
                 body: JSON.stringify(newNoticeData)
             });
         }
-        updateAiProgress(95, '저장된 공지 목록을 새로 불러오고 있습니다.', 'save', 98);
+        document.getElementById('ai-progress-status').textContent = '저장된 공지 목록을 새로 불러오고 있습니다.';
         await loadAdminNoticeList();
-        finishAiProgress(editingNoticeId ? '공지 수정이 완료되었습니다.' : '공지 등록이 완료되었습니다.');
-        await new Promise(resolve => setTimeout(resolve, 250));
     } catch (error) {
         if (isGeminiRateLimitError(error)) {
             await showGeminiRetryCountdown(error);
