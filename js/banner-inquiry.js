@@ -197,7 +197,11 @@ async function submitBannerInquiry(event) {
         setBannerInquiryStatus('접수가 완료되었습니다. 담당자가 확인 후 입력하신 연락처로 회신합니다.');
         window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
     } catch (error) {
-        setBannerInquiryStatus(error.message || '잠시 후 다시 시도해주세요.', true);
+        // fetch가 회선 단계에서 끊기면 'Failed to fetch' 같은 영어 원문이 올라온다.
+        const isNetworkError = error instanceof TypeError;
+        setBannerInquiryStatus(isNetworkError
+            ? '네트워크 연결을 확인한 뒤 다시 시도해주세요.'
+            : (error.message || '잠시 후 다시 시도해주세요.'), true);
     } finally {
         bannerInquirySubmit.disabled = false;
     }

@@ -192,8 +192,9 @@ test('the public page drops the top banner, the saved-posts feature, and the ref
     assert.match(html, /<h1 class="site-title" id="site-title">[\s\S]*?id="site-title-mark"[\s\S]*?alt="SNU ECE 공지방"/);
     assert.match(html, /<span class="site-title-text">SNU ECE 공지방<\/span>/);
     assert.doesNotMatch(html, /제목을 누르면 새로고침|site-title-hint|reloadNoticeBoard/);
-    // 종은 화면에서 뺐다. 알림은 푸터의 "알림 설정"으로만 연다.
-    assert.doesNotMatch(html, /id="bell-toggle"/);
+    // 종을 제목 옆에 되살렸다. guide·faq가 안내하는 진입점과 화면이 일치해야 한다.
+    // 푸터의 "알림 설정"은 보조 진입점으로 함께 남긴다.
+    assert.match(html, /id="bell-toggle"/);
     assert.match(html, />알림 설정</);
     assert.match(html, /onclick="openNotificationPreferences\(\)"/);
     assert.doesNotMatch(app, /function reloadNoticeBoard/);
@@ -301,7 +302,7 @@ test('mobile cards stay compact, keep paging, and disable notice comparison drag
     assert.doesNotMatch(html, /mobile-special-filter-toggle|toggleMobileQuickFilters/);
     assert.match(html, /id="filter-toggle-bar"[\s\S]*aria-controls="filter-panel notice-quick-filters"/);
     assert.match(readNamedFunction(app, 'setFilterPanelOpen'), /quickFilters\?\.classList\.toggle\('is-mobile-open', open\)/);
-    assert.match(mobileCss, /\.notice-quick-filters\.is-mobile-open\s*\{[^}]*max-height:\s*116px;[^}]*opacity:\s*1;[^}]*visibility:\s*visible/s);
+    assert.match(mobileCss, /\.notice-quick-filters\.is-mobile-open\s*\{[^}]*max-height:\s*152px;[^}]*opacity:\s*1;[^}]*visibility:\s*visible/s);
     assert.match(mobileCss, /button:active:not\(:disabled\),[\s\S]*transform:\s*translateY\(1px\) scale\(0\.97\)/s);
     assert.match(renderCards, /const comparisonEnabled = getLayoutMode\(\) === 'desktop'/);
     assert.match(renderCards, /const blockControlsHtml = comparisonEnabled/);
@@ -1724,7 +1725,8 @@ test('public filters omit image presence, empty states stay simple, and the foot
     // 관리자 진입점은 주 링크 목록이 아니라 법적 고지 줄의 최소 버튼으로만 남는다.
     assert.match(html, /class="footer-admin-link"[\s\S]*rel="nofollow"/);
     assert.doesNotMatch(html, /관리자 페이지/);
-    assert.match(css, /\.site-footer\s*\{[^}]*color:\s*#8a919d/s);
+    // 푸터 본문은 배경 대비 4.5:1을 지키는 #697180. 더 밝히면 WCAG AA가 깨진다.
+    assert.match(css, /\.site-footer\s*\{[^}]*color:\s*#697180/s);
 });
 
 test('image notices lazy-load a poster; imageless notices show a big title poster', async () => {
@@ -2179,14 +2181,15 @@ test('the left rail never scrolls and the hover preview follows its card', async
     assert.match(html, /data-split-side="trash"/);
     assert.match(app, /placement === 'trash'/);
 
-    // 모바일 두 열이 나란히 끝나 생기는 아래 빈 띠를 벽돌 배치로 메운다.
-    // 끌어올린 만큼 위를 비워 두지 않으면 첫 줄이 잘린다.
-    assert.match(mobileCss, /\.grid > \.card:nth-child\(2n\+1\)\s*\{\s*margin-top:\s*-46px/);
+    // 정렬 버튼 왼쪽 빈 띠는 첫 카드 하나만 끌어올려 메운다.
+    // 왼쪽 열 전체(2n+1)를 올리면 음수 마진이 행 높이 계산에서 빠져 카드가 겹친다.
+    assert.match(mobileCss, /\.grid > \.card:first-child\s*\{\s*margin-top:\s*-46px/);
+    assert.doesNotMatch(mobileCss, /\.grid > \.card:nth-child\(2n\+1\)\s*\{\s*margin-top:\s*-46px/);
     // 위에 자리를 비워 두면 오른쪽 열이 그만큼 내려가 빈 띠가 오히려 넓어진다.
     const gridBlock = mobileCss.slice(mobileCss.indexOf('html[data-view="mobile"] .grid {'));
     assert.doesNotMatch(gridBlock.slice(0, gridBlock.indexOf('}')), /padding-top/);
     // "결과 N건"이 그 자리에 들어서면 끌어올리기를 멈춘다.
-    assert.match(mobileCss, /\.grid\.has-result-count > \.card:nth-child\(2n\+1\)\s*\{\s*margin-top:\s*0/);
+    assert.match(mobileCss, /\.grid\.has-result-count > \.card:first-child\s*\{\s*margin-top:\s*0/);
     assert.match(readNamedFunction(app, 'updateNoticeResultCount'), /classList\.toggle\('has-result-count', show\)/);
 });
 
@@ -2465,17 +2468,18 @@ test('closing a filter chip does not collapse the detail panel', async () => {
     assert.match(css, /\.filter-chip button\s*\{[^}]*width:\s*20px;[^}]*height:\s*20px/s);
     assert.match(mobileCss, /\.filter-chip button\s*\{[^}]*width:\s*28px;[^}]*height:\s*28px/s);
 
-    // 서랍 손잡이는 헤더 줄 안에서 배경에 묻히고 아이콘만 남는다.
+    // 서랍 손잡이는 서랍으로 들어가는 유일한 문이라 숨기지 않고 항상 보여 둔다.
+    // 스크롤 연동으로 숨겼다 보이면 최상단에 멈춘 사용자가 진입점을 못 찾는다.
     const menuBlock = mobileCss.slice(mobileCss.indexOf('html[data-view="mobile"] .mobile-menu-btn {'));
     const menuRule = menuBlock.slice(0, menuBlock.indexOf('}'));
     // 흐름에서 빠져 떠 있어야 제목이 버튼 없는 것처럼 왼쪽 끝에 붙는다.
     assert.match(menuRule, /position:\s*fixed/);
-    // 평소에는 숨어 있다가 목록을 내리면 나타나고, 두면 스스로 사라진다.
-    assert.match(menuRule, /opacity:\s*0/);
-    assert.match(menuRule, /pointer-events:\s*none/);
-    assert.match(mobileCss, /\.mobile-menu-btn\.is-visible\s*\{[^}]*opacity:\s*1/s);
-    assert.match(readNamedFunction(app, 'revealMobileMenuHandle'), /MENU_HANDLE_IDLE_MS/);
-    assert.match(readNamedFunction(app, 'revealMobileMenuHandle'), /isMobileDrawerOpen\(\)/);
+    assert.doesNotMatch(menuRule, /opacity:\s*0/);
+    assert.doesNotMatch(menuRule, /pointer-events:\s*none/);
+    // 자동 숨김 장치는 코드에서 걷어냈다.
+    assert.doesNotMatch(app, /revealMobileMenuHandle|MENU_HANDLE_IDLE_MS/);
+    // 보이는 34px은 그대로 두되 누르는 영역은 ::after로 44px을 확보한다.
+    assert.match(mobileCss, /\.mobile-menu-btn::after\s*\{[^}]*inset:\s*-5px/s);
     // 푸터 2x2의 십자 구분선은 없앤다.
     assert.doesNotMatch(mobileCss, /\.footer-column\s*\{[^}]*border-right/s);
     // 헤더도 흰 카드가 아니라 배경 위에 그대로 얹힌다.

@@ -497,12 +497,27 @@ create table if not exists public.notification_jobs (
   claim_token uuid,
   created_at timestamptz not null default now(),
   completed_at timestamptz,
-  unique (notice_id, kind)
+  -- 마감 리마인더(deadline_reminder) 잡 전용: D-1/3/7 일수와 멱등 키.
+  reminder_days integer,
+  dedupe_key text
 );
 
 alter table public.notification_jobs
   add column if not exists claimed_at timestamptz,
-  add column if not exists claim_token uuid;
+  add column if not exists claim_token uuid,
+  add column if not exists reminder_days integer,
+  add column if not exists dedupe_key text;
+
+-- 예전 unique (notice_id, kind)는 공지당 리마인더 잡을 하나로 묶어 D-7이 D-3/D-1을
+-- 막아버린다. new_notice에만 부분 유니크를 걸고, 리마인더는 dedupe_key로 멱등 처리한다.
+alter table public.notification_jobs
+  drop constraint if exists notification_jobs_notice_id_kind_key;
+create unique index if not exists notification_jobs_new_notice_unique
+  on public.notification_jobs (notice_id, kind)
+  where kind = 'new_notice';
+create unique index if not exists notification_jobs_dedupe_key_idx
+  on public.notification_jobs (dedupe_key)
+  where dedupe_key is not null;
 
 create table if not exists public.notification_deliveries (
   id bigint generated always as identity primary key,
@@ -667,7 +682,7 @@ begin
   if should_notify then
     insert into public.notification_jobs (notice_id, kind, status)
     values (created_row.id, 'new_notice', 'pending')
-    on conflict (notice_id, kind) do nothing;
+    on conflict (notice_id, kind) where kind = 'new_notice' do nothing;
   end if;
 
   return next created_row;
@@ -759,7 +774,7 @@ begin
   if should_notify then
     insert into public.notification_jobs (notice_id, kind, status)
     values (updated_row.id, 'new_notice', 'pending')
-    on conflict (notice_id, kind) do nothing;
+    on conflict (notice_id, kind) where kind = 'new_notice' do nothing;
   end if;
 
   if edits ? 'categoryIds' then

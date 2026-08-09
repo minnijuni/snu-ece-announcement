@@ -24,6 +24,10 @@ function normalizeCategoryIds(values) {
     ));
 }
 
+const DEADLINE_REMINDER_DAYS = [1, 3, 7];
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function normalizePreferences(preferences = {}) {
     const admissionYear = String(preferences.admissionYear || '').trim();
     const reminder = preferences.deadlineReminderDays;
@@ -32,10 +36,20 @@ function normalizePreferences(preferences = {}) {
         allNotices: Boolean(preferences.allNotices),
         categoryIds: normalizeCategoryIds(preferences.categoryIds),
         urgentEnabled: preferences.urgentEnabled !== false,
-        deadlineReminderDays: [1, 3, 7].includes(Number(reminder))
+        deadlineReminderDays: DEADLINE_REMINDER_DAYS.includes(Number(reminder))
             ? Number(reminder)
             : null
     };
+}
+
+// 마감까지 남은 일수를 한국 시간 달력 날짜 기준으로 센다. 마감이 없거나 상시 모집이면 null.
+function deadlineDDayInSeoul(notice, now = new Date()) {
+    if (!notice || notice.isAlwaysOpen) return null;
+    const deadlineTime = Date.parse(notice.deadlineAt || notice.deadline || '');
+    const nowTime = now instanceof Date ? now.getTime() : Date.parse(now);
+    if (!Number.isFinite(deadlineTime) || !Number.isFinite(nowTime)) return null;
+    return Math.floor((deadlineTime + KST_OFFSET_MS) / DAY_MS)
+        - Math.floor((nowTime + KST_OFFSET_MS) / DAY_MS);
 }
 
 function validateBrowserSubscription(subscription) {
@@ -63,7 +77,7 @@ function publicSubscription(row) {
     return safe;
 }
 
-export function matchesSubscription(notice, subscription) {
+export function matchesSubscription(notice, subscription, now = new Date()) {
     if (subscription?.status && subscription.status !== 'active') return false;
     const noticeTargets = Array.isArray(notice?.targets) ? notice.targets : [];
     const audienceMatches = noticeTargets.includes('전체')
@@ -71,6 +85,11 @@ export function matchesSubscription(notice, subscription) {
         || noticeTargets.includes(subscription.admissionYear);
     if (!audienceMatches) return false;
     if (subscription?.allNotices) return true;
+    if (subscription?.urgentEnabled) {
+        // '마감 임박 공지 포함': 마감이 3일 이내면 카테고리 필터를 건너뛴다(학번 필터는 유지).
+        const dDay = deadlineDDayInSeoul(notice, now);
+        if (dDay !== null && dDay >= 0 && dDay <= 3) return true;
+    }
     const noticeCategories = normalizeCategoryIds(notice?.categoryIds);
     const subscribedCategories = normalizeCategoryIds(subscription?.categoryIds);
     return noticeCategories.some(id => subscribedCategories.includes(id));
@@ -110,10 +129,14 @@ export function createPushService({ store, webPushClient, config, now = () => ne
             }, job.claimToken);
             return { sent: 0, failed: 0 };
         }
+        const timestamp = now();
+        const isDeadlineReminder = job.kind === 'deadline_reminder';
+        const reminderDays = isDeadlineReminder ? Number(job.reminderDays) : null;
         const subscriptions = (await store.listPushSubscriptions())
             .filter(subscription =>
                 subscription.status === 'active'
-                && matchesSubscription(notice, subscription)
+                && matchesSubscription(notice, subscription, timestamp)
+                && (!isDeadlineReminder || subscription.deadlineReminderDays === reminderDays)
             );
         await store.ensureNotificationDeliveries(
             job.id,
@@ -122,7 +145,6 @@ export function createPushService({ store, webPushClient, config, now = () => ne
         const subscriptionById = new Map(
             subscriptions.map(subscription => [String(subscription.id), subscription])
         );
-        const timestamp = now();
         const deliveries = await store.listNotificationDeliveries(job.id);
         let sent = 0;
         let failed = 0;
@@ -150,10 +172,14 @@ export function createPushService({ store, webPushClient, config, now = () => ne
                         auth: subscription.auth
                     }
                 }, JSON.stringify({
-                    title: notice.title,
+                    title: isDeadlineReminder
+                        ? `[마감 D-${reminderDays}] ${notice.title}`
+                        : notice.title,
                     body: (notice.aiSummary?.[0] || notice.content || '').slice(0, 180),
                     url: `/?id=${encodeURIComponent(notice.id)}`,
-                    tag: `notice-${notice.id}`
+                    tag: isDeadlineReminder
+                        ? `notice-${notice.id}-d${reminderDays}`
+                        : `notice-${notice.id}`
                 }), { TTL: 300, timeout: 30_000 });
                 await store.updateNotificationDelivery(delivery.id, {
                     status: 'sent',
@@ -166,13 +192,14 @@ export function createPushService({ store, webPushClient, config, now = () => ne
             } catch (error) {
                 const statusCode = Number(error?.statusCode || error?.status);
                 const attempts = Number(delivery.attempts || 0) + 1;
-                if (statusCode === 404 || statusCode === 410) {
+                // 401/403은 VAPID 키 불일치처럼 재시도로 살아나지 않으므로 404/410과 같게 처리한다.
+                if ([401, 403, 404, 410].includes(statusCode)) {
                     await store.deactivatePushSubscription(subscription.id);
                     await store.updateNotificationDelivery(delivery.id, {
                         status: 'permanent_failure',
                         attempts,
                         nextAttemptAt: null,
-                        lastError: `push endpoint gone (${statusCode})`
+                        lastError: `push endpoint unusable (${statusCode})`
                     });
                 } else {
                     const retryMinutes = [1, 5, 30][attempts - 1];
@@ -246,6 +273,32 @@ export function createPushService({ store, webPushClient, config, now = () => ne
         async deleteSubscription(id, managementToken) {
             await authenticatedSubscription(id, managementToken);
             await store.deletePushSubscription(id);
+        },
+
+        // 마감 1/3/7일 전 리마인더 잡을 만든다. dedupeKey 덕분에 여러 번 불러도 안전하다.
+        async enqueueDeadlineReminders({ notices = [], now: timestamp = now() } = {}) {
+            if (!config.enabled) return { created: 0 };
+            const subscriptions = (await store.listPushSubscriptions())
+                .filter(subscription => subscription.status === 'active');
+            let created = 0;
+            for (const notice of notices) {
+                if (!notice || notice.status !== 'published') continue;
+                const dDay = deadlineDDayInSeoul(notice, timestamp);
+                if (dDay === null || !DEADLINE_REMINDER_DAYS.includes(dDay)) continue;
+                const hasRecipient = subscriptions.some(subscription =>
+                    subscription.deadlineReminderDays === dDay
+                    && matchesSubscription(notice, subscription, timestamp)
+                );
+                if (!hasRecipient) continue;
+                const job = await store.createNotificationJobIfAbsent({
+                    kind: 'deadline_reminder',
+                    reminderDays: dDay,
+                    noticeId: notice.id,
+                    dedupeKey: `reminder-${notice.id}-${dDay}`
+                });
+                if (job) created += 1;
+            }
+            return { created };
         },
 
         async processPendingJobs({ batchSize = 50 } = {}) {

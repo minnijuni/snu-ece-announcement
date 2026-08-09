@@ -121,6 +121,7 @@ const pushService = createPushService({
 });
 let notificationWorkerRunning = false;
 let notificationWorkerTimer = null;
+let deadlineRemindersEnqueuedAt = 0;
 
 function initializeNotificationWorker() {
     if (!automationConfig.push.enabled || notificationWorkerTimer) return;
@@ -128,6 +129,13 @@ function initializeNotificationWorker() {
         if (notificationWorkerRunning) return;
         notificationWorkerRunning = true;
         try {
+            // 마감 1/3/7일 전 리마인더는 한 시간에 한 번만 훑는다(잡 자체는 dedupeKey로 중복 방지).
+            if (Date.now() - deadlineRemindersEnqueuedAt >= 60 * 60 * 1000) {
+                deadlineRemindersEnqueuedAt = Date.now();
+                await pushService.enqueueDeadlineReminders({
+                    notices: await automationStore.listPublishedNotices()
+                });
+            }
             await pushService.processPendingJobs();
         } catch (error) {
             console.error('알림 작업 처리 실패:', error);

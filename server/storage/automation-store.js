@@ -485,6 +485,28 @@ function createJsonStore(filePath, canonicalCategories = []) {
             return document.notificationJobs.map(job => ({ ...job }));
         },
 
+        async createNotificationJobIfAbsent(job) {
+            return mutate(document => {
+                if (job.dedupeKey && document.notificationJobs.some(item =>
+                    item.dedupeKey === job.dedupeKey
+                )) return null;
+                const now = new Date().toISOString();
+                const created = {
+                    id: nextId(document.notificationJobs),
+                    noticeId: job.noticeId,
+                    kind: job.kind || 'new_notice',
+                    reminderDays: job.reminderDays ?? null,
+                    dedupeKey: job.dedupeKey || null,
+                    status: 'pending',
+                    attemptCount: 0,
+                    createdAt: now,
+                    updatedAt: now
+                };
+                document.notificationJobs.push(created);
+                return { ...created };
+            });
+        },
+
         async createManualNotice(payload, { notify = true } = {}) {
             return mutate(document => {
                 const now = new Date().toISOString();
@@ -1221,6 +1243,36 @@ function createSupabaseStore(supabase, canonicalCategories = []) {
             return data || [];
         },
 
+        async createNotificationJobIfAbsent(job) {
+            // dedupe_key·reminder_days 컬럼이 없는 배포에서 서버가 죽으면 안 되므로
+            // 실패는 경고만 남긴다. 잡을 못 만들면 다음 주기에 다시 시도된다.
+            try {
+                const { data: existing, error: selectError } = await supabase
+                    .from('notification_jobs')
+                    .select('id')
+                    .eq('dedupe_key', job.dedupeKey)
+                    .maybeSingle();
+                if (selectError) throw selectError;
+                if (existing) return null;
+                const { data, error } = await supabase
+                    .from('notification_jobs')
+                    .insert({
+                        notice_id: job.noticeId,
+                        kind: job.kind || 'new_notice',
+                        reminder_days: job.reminderDays ?? null,
+                        dedupe_key: job.dedupeKey || null,
+                        status: 'pending'
+                    })
+                    .select('*')
+                    .maybeSingle();
+                if (error) throw error;
+                return data;
+            } catch (error) {
+                console.warn('알림 잡 생성 실패:', error?.message || error);
+                return null;
+            }
+        },
+
         async listPendingNotificationJobs(batchSize = 50) {
             const staleBefore = new Date(Date.now() - STALE_NOTIFICATION_JOB_MS).toISOString();
             const { error: recoveryError } = await supabase
@@ -1241,6 +1293,7 @@ function createSupabaseStore(supabase, canonicalCategories = []) {
                 id: Number(job.id),
                 noticeId: Number(job.notice_id),
                 kind: job.kind,
+                reminderDays: job.reminder_days ?? null,
                 status: job.status
             }));
         },
@@ -1265,6 +1318,7 @@ function createSupabaseStore(supabase, canonicalCategories = []) {
                 id: Number(data.id),
                 noticeId: Number(data.notice_id),
                 kind: data.kind,
+                reminderDays: data.reminder_days ?? null,
                 status: data.status,
                 claimToken: data.claim_token
             };

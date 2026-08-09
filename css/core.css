@@ -69,7 +69,8 @@ body {
     /* 아래 여백은 푸터가 전부 갖는다. page-main의 바닥 패딩과 겹쳐
        어중간한 합이 나오지 않도록 0으로 두고 여기서만 정한다. */
     padding: 34px 4px 0;
-    color: #8a919d;
+    /* 흰 바탕 대비 4.5:1(WCAG AA)을 넘기는 회색. 더 옅으면 면책 고지가 안 읽힌다. */
+    color: #697180;
     border-top: 1px solid var(--border-soft);
     font-size: 12px;
     line-height: 1.7;
@@ -105,7 +106,7 @@ body {
     gap: 5px;
     min-height: 26px;
     padding: 3px 0;
-    color: #6f7885;
+    color: #657082;
     background: transparent;
     border: 0;
     border-radius: 0;
@@ -135,7 +136,7 @@ body {
     margin-top: 26px;
     padding-top: 16px;
     border-top: 1px solid var(--border-soft);
-    color: #6f7885;
+    color: #657082;
     font-size: 12px;
 }
 .footer-sync-content {
@@ -171,7 +172,7 @@ body {
 .footer-admin-link {
     flex-shrink: 0;
     padding: 5px 10px;
-    color: #a2a9b4;
+    color: #6d7684;
     background: transparent;
     border: 1px solid var(--border);
     font-size: 11px;
@@ -180,7 +181,7 @@ body {
     white-space: nowrap;
     transition: color 0.15s ease, border-color 0.15s ease;
 }
-.footer-admin-link:hover { color: #6f7885; border-color: #c9ced6; }
+.footer-admin-link:hover { color: #525c6b; border-color: #c9ced6; }
 .footer-admin-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* ---------- 좌우 고정 레일 (공통 외형) ----------
@@ -800,6 +801,8 @@ body {
     outline: none;
 }
 .search-container input::-webkit-search-cancel-button { cursor: pointer; }
+/* 위에서 지운 기본 outline의 대체 표시. 키보드 포커스에서만 공통 링을 그린다. */
+.search-container input:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .search-submit {
     display: grid;
     width: 42px;
@@ -916,7 +919,8 @@ body {
     border: 0;
     border-radius: 6px;
     background: transparent;
-    color: var(--text-sub);
+    /* 옅은 회색 알약 배경(#f2f4f8) 위에서도 4.5:1 대비가 나오는 회색 */
+    color: #5f6875;
     font: inherit;
     font-size: 12px;
     font-weight: 700;
@@ -1256,6 +1260,9 @@ body.notice-dragging .notice-hover-preview { display: none !important; }
 }
 
 /* ---------- 모달 ---------- */
+/* 모달이 열려 있는 동안 뒤 페이지가 함께 스크롤되지 않게 잠근다.
+   여닫는 JS가 이 클래스를 붙였다 뗀다. */
+body.modal-open { overflow: hidden; }
 .overlay {
     display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(20, 26, 36, 0.45);
@@ -1263,7 +1270,9 @@ body.notice-dragging .notice-hover-preview { display: none !important; }
     z-index: 1000; padding: 20px; cursor: pointer;
 }
 .modal {
-    background: white; width: 640px; max-width: 100%; max-height: 88vh;
+    /* 높이는 vh를 먼저 쓰고 dvh로 덮는다. 모바일 주소창이 보일 때 vh는 실제
+       가시 영역보다 커서 위아래가 잘린다. dvh를 모르는 브라우저는 vh로 진다. */
+    background: white; width: 640px; max-width: 100%; max-height: 88vh; max-height: 88dvh;
     border: 1px solid var(--border); border-top: 3px solid var(--primary-deep);
     padding: 34px 36px; overflow-y: auto; position: relative;
     animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); cursor: default;
@@ -1414,6 +1423,7 @@ body.notice-dragging .notice-hover-preview { display: none !important; }
     display: block;
     max-width: 100%;
     max-height: calc(100vh - 128px);
+    max-height: calc(100dvh - 128px);
     object-fit: contain;
     background: rgba(255,255,255,0.02);
     box-shadow: 0 22px 60px rgba(0,0,0,0.48);
@@ -1757,6 +1767,7 @@ body.notice-dragging .notice-hover-preview { display: none !important; }
     box-shadow: 0 14px 34px rgba(20, 43, 88, 0.15);
 }
 .compare-col:focus { outline: none; }
+.compare-col:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .compare-col.is-dragging { opacity: 0.28; }
 .compare-col.is-drop-before::before,
 .compare-col.is-drop-after::after {
@@ -2238,7 +2249,7 @@ body.reordering-compare-block .compare-trash-zone {
 .device-stage { display: flex; flex-direction: column; align-items: center; gap: 18px; }
 .device-frame {
     position: relative;
-    width: 390px; height: min(844px, 88vh);
+    width: 390px; height: min(844px, 88vh); height: min(844px, 88dvh);
     background: #0b0b0d;
     border-radius: 46px;
     padding: 14px;

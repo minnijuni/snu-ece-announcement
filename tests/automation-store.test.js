@@ -17,8 +17,9 @@ test('automation configuration disables protected jobs when secrets are absent',
 test('automation configuration accepts complete crawl and push settings', () => {
     const config = getAutomationConfig({
         CRAWL_TRIGGER_SECRET: 'a'.repeat(32),
-        VAPID_PUBLIC_KEY: 'public',
-        VAPID_PRIVATE_KEY: 'private',
+        // web-push 규격대로 공개키 65바이트·비밀키 32바이트여야 푸시가 켜진다.
+        VAPID_PUBLIC_KEY: Buffer.alloc(65, 4).toString('base64url'),
+        VAPID_PRIVATE_KEY: Buffer.alloc(32, 7).toString('base64url'),
         VAPID_SUBJECT: 'mailto:ece@example.com'
     });
 
@@ -264,6 +265,40 @@ test('JSON automation store hides and restores published crawled notices without
 
     const restored = await store.setPublishedNoticeHidden(pending.id, false);
     assert.equal(restored.isHidden, false);
+});
+
+test('JSON automation store deduplicates notification jobs by dedupe key', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'ece-store-dedupe-'));
+    const store = createAutomationStore({
+        useSupabase: false,
+        filePath: path.join(directory, 'automation.json')
+    });
+
+    const first = await store.createNotificationJobIfAbsent({
+        kind: 'deadline_reminder',
+        reminderDays: 3,
+        noticeId: 11,
+        dedupeKey: 'reminder-11-3'
+    });
+    const duplicate = await store.createNotificationJobIfAbsent({
+        kind: 'deadline_reminder',
+        reminderDays: 3,
+        noticeId: 11,
+        dedupeKey: 'reminder-11-3'
+    });
+    const other = await store.createNotificationJobIfAbsent({
+        kind: 'deadline_reminder',
+        reminderDays: 1,
+        noticeId: 11,
+        dedupeKey: 'reminder-11-1'
+    });
+
+    assert.equal(first.status, 'pending');
+    assert.equal(first.kind, 'deadline_reminder');
+    assert.equal(first.reminderDays, 3);
+    assert.equal(duplicate, null);
+    assert.equal(other.dedupeKey, 'reminder-11-1');
+    assert.equal((await store.listNotificationJobs()).length, 2);
 });
 
 test('JSON notification job renewals are fenced by a unique claim token', async () => {

@@ -16,6 +16,15 @@ html[data-view="mobile"] select,
 html[data-view="mobile"] textarea {
     border-radius: 13px;
 }
+/* iOS 사파리는 16px 미만 입력칸에 포커스가 가면 화면을 강제 확대하고,
+   포커스를 빼도 확대가 남는다. 글자를 넣는 칸은 전부 16px 이상으로 둔다. */
+html[data-view="mobile"] input,
+html[data-view="mobile"] select,
+html[data-view="mobile"] textarea {
+    font-size: 16px;
+}
+/* core의 input[type="date"] 규칙이 더 구체적이라 따로 한 번 더 이긴다. */
+html[data-view="mobile"] .filter-date-row input[type="date"] { font-size: 16px; }
 html[data-view="mobile"] button,
 html[data-view="mobile"] a,
 html[data-view="mobile"] [role="button"] {
@@ -85,9 +94,9 @@ html[data-view="mobile"] .drawer-scrim.drawer-open { display: block; }
     background: rgba(72, 82, 100, 0.62);
     border-color: rgba(255, 255, 255, 0.42);
 }
-/* 화면 왼쪽 위에 떠 있는 버튼. 흐름에서 빠져 있어 제목은 이 버튼이 없는
-   것처럼 왼쪽 끝에 붙는다. 평소에는 숨어 있다가 목록을 조금이라도 내리면
-   나타나고, 손을 떼고 잠시 두면 스스로 사라진다. */
+/* 화면 왼쪽 위에 떠 있는 버튼. 서랍으로 들어가는 유일한 문이라 숨기지 않고
+   항상 보여 둔다. 스크롤에 맞춰 숨었다 나타나게 하면 최상단에 멈춘 사용자는
+   진입점을 영영 찾지 못한다. */
 html[data-view="mobile"] .mobile-menu-btn {
     display: grid;
     position: fixed;
@@ -100,17 +109,15 @@ html[data-view="mobile"] .mobile-menu-btn {
     background: rgba(255, 255, 255, 0.82);
     border-color: rgba(31, 63, 143, 0.1);
     border-radius: 10px;
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(-6px);
     -webkit-backdrop-filter: blur(6px);
     backdrop-filter: blur(6px);
     transition: opacity .2s ease, transform .2s ease, top .2s ease, color .15s ease;
 }
-html[data-view="mobile"] .mobile-menu-btn.is-visible {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0);
+/* 눈에 보이는 34px는 그대로 두고 누르는 영역만 44px 사각형으로 넓힌다. */
+html[data-view="mobile"] .mobile-menu-btn::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
 }
 /* 검색 줄이 함께 떠 있으면 그 줄 안에 나란히 선 것처럼 높이를 맞춘다.
    검색칸은 위 여백 8px에 42px 높이라 가운데가 29px, 손잡이는 34px이므로 12px. */
@@ -198,9 +205,9 @@ html[data-view="mobile"] .header {
     row-gap: 10px;
     align-items: center;
     gap: 8px;
-    /* 손잡이는 평소 숨어 있으므로 위를 비워 둘 필요가 없다. */
+    /* 왼쪽 위에 늘 떠 있는 서랍 손잡이와 제목이 겹치지 않게 그 폭만큼 비켜 선다. */
     margin: 0 0 10px;
-    padding: 2px 0 8px;
+    padding: 2px 0 8px 36px;
     background: transparent;
     border: 0;
     border-radius: 0;
@@ -299,7 +306,7 @@ html[data-view="mobile"] .notice-quick-filters {
 }
 html[data-view="mobile"] .notice-quick-filters.is-mobile-open {
     /* 칩이 커졌으므로 좁은 화면에서 세 줄로 접혀도 잘리지 않게 여유를 둔다. */
-    max-height: 116px;
+    max-height: 152px;
     margin: 5px 0 10px;
     opacity: 1;
     visibility: visible;
@@ -307,7 +314,7 @@ html[data-view="mobile"] .notice-quick-filters.is-mobile-open {
     transition-delay: 0s;
 }
 html[data-view="mobile"] .notice-quick-filters button {
-    min-height: 32px;
+    min-height: 44px;
     width: auto;
     min-width: 0;
     padding-inline: 12px;
@@ -348,27 +355,25 @@ html[data-view="mobile"] .notice-sort-chips {
 }
 html[data-view="mobile"] .notice-sort-chips button {
     flex: 0 1 auto;
-    min-height: 34px;
+    min-height: 44px;
     padding-inline: 8px;
     font-size: 10.5px;
 }
 
 /* ---------- 공지 목록 ---------- */
-/* 두 열이 나란히 끝나면 아래에 빈 띠가 남는다. 왼쪽 열을 정렬 버튼 줄
-   높이까지 끌어올려 벽돌처럼 어긋나게 두면 그 자리가 메워진다.
-   정렬 버튼은 오른쪽에 몰려 있어 그 왼쪽은 비어 있다. */
 html[data-view="mobile"] .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
     align-items: start;
 }
-/* 위쪽에 자리를 비워 두면 오른쪽 열이 그만큼 내려가 빈 띠가 오히려 넓어진다.
-   목록 전체는 제자리에 두고 왼쪽 열만 정렬 버튼 줄 옆으로 끌어올린다.
-   그 자리는 정렬 버튼이 오른쪽에 몰려 있어 비어 있다. */
-html[data-view="mobile"] .grid > .card:nth-child(2n+1) { margin-top: -46px; }
+/* 정렬 버튼은 오른쪽에 몰려 있어 그 왼쪽이 빈 띠로 남는다. 첫 카드 하나만
+   그 옆으로 끌어올려 자리를 메운다. 왼쪽 열 전체(2n+1)를 올리면 음수 마진이
+   행 높이 계산에서 빠져, 왼쪽 카드가 오른쪽보다 조금만 길어도 다음 행의
+   카드가 위 카드를 덮는다. */
+html[data-view="mobile"] .grid > .card:first-child { margin-top: -46px; }
 /* 검색·필터를 걸면 그 자리에 "결과 N건"이 들어선다. 카드가 겹치지 않게
    끌어올리기를 멈춘다. */
-html[data-view="mobile"] .grid.has-result-count > .card:nth-child(2n+1) { margin-top: 0; }
+html[data-view="mobile"] .grid.has-result-count > .card:first-child { margin-top: 0; }
 html[data-view="mobile"] .card {
     width: 100%;
     height: auto;
@@ -489,7 +494,7 @@ html[data-view="mobile"] .image-viewer-action {
 }
 html[data-view="mobile"] .image-viewer-close { width: 38px; min-height: 38px; }
 html[data-view="mobile"] .image-viewer-stage { padding: 12px; }
-html[data-view="mobile"] .image-viewer-stage img { max-height: calc(100vh - 86px); }
+html[data-view="mobile"] .image-viewer-stage img { max-height: calc(100vh - 86px); max-height: calc(100dvh - 86px); }
 html[data-view="mobile"] .image-viewer .nav-btn {
     width: 38px;
     height: 44px;
@@ -509,7 +514,7 @@ html[data-view="mobile"] .search-field {
     border-width: 1.5px;
     border-radius: 24px;
 }
-html[data-view="mobile"] .search-container input { width: 100%; min-width: 0; font-size: 14px; }
+html[data-view="mobile"] .search-container input { width: 100%; min-width: 0; font-size: 16px; }
 html[data-view="mobile"] .search-submit { width: 38px; height: 38px; }
 /* '상세 필터' 바가 빠른 필터 줄보다 먼저 온다. 바를 누르면 그 아래로
    빠른 필터가 펼쳐지고 이어서 상세 패널이 열린다. */
@@ -572,6 +577,8 @@ html[data-view="mobile"] .detail-back {
 
 /* ---------- 모달 ---------- */
 html[data-view="mobile"] .modal { padding: 24px 18px; border: 0; border-radius: 24px; }
+/* 닫기 ×가 모달을 벗어나는 유일한 손잡이라 44px 터치 타겟으로 키운다. */
+html[data-view="mobile"] .close-btn { width: 44px; height: 44px; }
 html[data-view="mobile"] .form-row { flex-direction: column; gap: 0; }
 /* 모바일에서는 비교·분할·6점 드래그 UI를 제공하지 않는다. */
 html[data-view="mobile"] .card-block-controls,
@@ -660,7 +667,8 @@ html[data-view="mobile"] .site-footer-sync[data-state="failed"] {
     border-color: rgba(192, 57, 43, 0.24);
 }
 html[data-view="mobile"] .site-footer-sync[data-state="loading"] {
-    color: #6f7885;
+    /* 옅은 회색 배경 위에서도 4.5:1 대비가 나오는 회색 */
+    color: #5e6876;
     background: #f4f6f9;
     border-color: var(--border);
 }
@@ -798,3 +806,25 @@ html[data-view="mobile"] .filter-chip button {
 /* 모바일 제목 줄에서도 종이 로고에 밀리지 않게 크기를 지킨다. */
 html[data-view="mobile"] .bell-toggle { width: 38px; height: 38px; }
 html[data-view="mobile"] .bell-toggle svg { width: 25px; height: 25px; }
+
+/* ---------- 44px 터치 타겟 보정 ---------- */
+/* 시각 크기 38px은 그대로 두고, 햄버거와 같은 방식으로 누르는 영역만
+   ::after 사각형으로 44px 이상을 확보한다. */
+html[data-view="mobile"] .detail-image-nav,
+html[data-view="mobile"] .image-viewer-action,
+html[data-view="mobile"] .image-viewer-close,
+html[data-view="mobile"] .image-viewer .nav-btn,
+html[data-view="mobile"] .search-submit,
+html[data-view="mobile"] .bell-toggle {
+    position: relative;
+}
+html[data-view="mobile"] .detail-image-nav::after,
+html[data-view="mobile"] .image-viewer-action::after,
+html[data-view="mobile"] .image-viewer-close::after,
+html[data-view="mobile"] .image-viewer .nav-btn::after,
+html[data-view="mobile"] .search-submit::after,
+html[data-view="mobile"] .bell-toggle::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+}

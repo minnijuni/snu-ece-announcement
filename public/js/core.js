@@ -26,6 +26,7 @@ let currentImageIndex = 0;
 let detailImageArray = [];
 let detailImageIndex = 0;
 let imageSwipeStartX = null;
+let imageSwipeStartY = null;
 let boardScrollPosition = 0;
 let detailHistoryPushed = false;
 
@@ -50,6 +51,8 @@ let bannerRenderedCount = 0;
 let bannerSettleTimer = null;
 const BANNER_SLIDE_DURATION = 460;
 const BANNER_ROTATION_DELAY = 6500;
+// 일시정지 버튼으로 사용자가 자동 회전을 끈 상태. 다시 누를 때까지 유지한다.
+let bannerRotationPaused = false;
 let compareBlocks = [];   // 독립 비교 공간에 담긴 공지 id들 (데스크톱 전용, 최대 4)
 let compareWorkspaceOpen = false;
 let compareDockSide = 'left';
@@ -237,7 +240,7 @@ function handleNoticeCardArrowKey(event) {
         ? (step === 1 ? 0 : cards.length - 1)
         : (current + step + cards.length) % cards.length;
     const next = cards[nextIndex];
-    next.setAttribute('tabindex', '-1');
+    // 카드는 이미 tabindex=0이라 -1로 낮추면 탭 순서에서 빠진다. 초점만 옮긴다.
     next.focus();
     event.preventDefault();
 }
@@ -395,15 +398,24 @@ function getBannerManageHeaders(tokenOverride = '') {
 }
 
 async function apiRequest(path, options = {}) {
-    const response = await fetch(buildApiUrl(path), {
-        ...options,
-        // 관리자 세션 쿠키는 API가 다른 사이트에 있어도 따라가야 한다.
-        credentials: 'include',
-        headers: {
-            'Content-Type': 'application/json',
-            ...(options.headers || {})
-        }
-    });
+    let response;
+    try {
+        response = await fetch(buildApiUrl(path), {
+            ...options,
+            // 관리자 세션 쿠키는 API가 다른 사이트에 있어도 따라가야 한다.
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            }
+        });
+    } catch {
+        // fetch가 회선 단계에서 던지는 'Failed to fetch'는 영어 그대로
+        // 화면에 나가면 안 된다. status 없는 오류가 곧 네트워크 오류다.
+        const networkError = new Error('네트워크 연결을 확인한 뒤 다시 시도해주세요.');
+        networkError.code = 'NETWORK';
+        throw networkError;
+    }
 
     if (response.status === 204) {
         return null;
@@ -475,8 +487,11 @@ function createNoticeRepository(request) {
                 if (!result?.notice) throw new Error('공지 상세를 불러오지 못했습니다.');
                 const index = items.findIndex(notice => String(notice.id) === noticeId);
                 if (index === -1) {
-                    items.push(result.notice);
-                    return result.notice;
+                    // 딥링크로만 불러온 공지다. 상세·비교 조회는 되게 두되,
+                    // 현재 필터·페이지가 정한 목록 그리드에는 끼어들면 안 된다.
+                    const orphan = { ...result.notice, outsideCurrentList: true };
+                    items.push(orphan);
+                    return orphan;
                 }
                 items[index] = { ...items[index], ...result.notice };
                 return items[index];
@@ -568,11 +583,17 @@ function getNoticeListFilters() {
     };
 }
 
+/* noticeListRequestVersion은 목록 요청의 경합 감시표다. 페이지 이동과
+   검색·정렬 변경이 겹치면 늦게 도착한 이전 응답이 화면을 되돌릴 수 있다.
+   호출부가 요청 직전에 번호를 올리므로, 여기서는 await 전에 쥔 번호가
+   응답 후에도 최신일 때만 전역 상태와 페이지네이션에 반영한다. */
 async function loadNoticePage(page, { replace = true } = {}) {
+    const requestVersion = noticeListRequestVersion;
     const result = await noticeRepository.loadPage(page, {
         replace,
         filters: getNoticeListFilters()
     });
+    if (requestVersion !== noticeListRequestVersion) return result;
     notices = result.notices;
     updateNoticePaginationUI(result.pagination, noticePageLoading);
     return result;
@@ -585,6 +606,7 @@ async function goToNoticePage(page) {
         || targetPage < 1 || targetPage > totalPages
         || targetPage === noticeRepository.pagination.page) return;
 
+    const requestVersion = ++noticeListRequestVersion;
     noticePageLoading = true;
     updateNoticePaginationUI(noticeRepository.pagination, true);
     try {
@@ -594,17 +616,21 @@ async function goToNoticePage(page) {
             compareLayoutMode = 'stack';
         }
         await loadNoticePage(targetPage);
+        if (requestVersion !== noticeListRequestVersion) return;
         buildHostButtons();
         renderNoticeCards();
         syncNoticeListUrl(targetPage);
         document.getElementById('spatial-workspace')
             ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) {
+        if (requestVersion !== noticeListRequestVersion) return;
         console.error('공지 페이지 이동 실패:', error);
         alert('공지 페이지를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
-        noticePageLoading = false;
-        updateNoticePaginationUI(noticeRepository.pagination, false);
+        if (requestVersion === noticeListRequestVersion) {
+            noticePageLoading = false;
+            updateNoticePaginationUI(noticeRepository.pagination, false);
+        }
     }
 }
 
@@ -726,10 +752,31 @@ function stopBannerRotation() {
 
 function startBannerRotation() {
     stopBannerRotation();
+    // 일시정지를 눌렀거나 움직임 줄이기 설정이면 스스로 넘기지 않는다.
+    if (bannerRotationPaused || prefersReducedMotion()) return;
     if (getBannerSlidesByPlacement('right_rail').slice(0, 5).length < 2) return;
     bannerRotationInterval = window.setInterval(() => {
         stepRightRailBanner(1);
     }, BANNER_ROTATION_DELAY);
+}
+
+function syncBannerPauseButton() {
+    const button = document.querySelector('#right-rail-ad-content .rail-ad-pause');
+    if (!button) return;
+    const label = bannerRotationPaused ? '배너 자동 넘김 재개' : '배너 자동 넘김 일시정지';
+    button.setAttribute('aria-pressed', bannerRotationPaused ? 'true' : 'false');
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.innerHTML = bannerRotationPaused
+        ? '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h3.4v14H7zM13.6 5H17v14h-3.4z"/></svg>';
+}
+
+function toggleBannerRotationPause() {
+    bannerRotationPaused = !bannerRotationPaused;
+    if (bannerRotationPaused) stopBannerRotation();
+    else restartBannerRotationIfIdle();
+    syncBannerPauseButton();
 }
 
 function prefersReducedMotion() {
@@ -922,6 +969,8 @@ function renderRightRailInquiryFallback() {
     bannerRenderedCount = 0;
     container.onmouseenter = null;
     container.onmouseleave = null;
+    container.onfocusin = null;
+    container.onfocusout = null;
 
     container.innerHTML = `<button class="rail-cta rail-ad-fallback" type="button"
         onclick="openBannerInquiryFromRail()">홍보 신청하기</button>`;
@@ -1008,6 +1057,12 @@ function renderRightRailAd({ restartRotation = true } = {}) {
                 `).join('')}
             </div>
             <span class="rail-ad-count" aria-live="off"></span>
+            <!-- 자동 회전 정지는 마우스 호버만으로는 부족하다. 키보드·터치로도
+                 멈출 수 있는 44px 버튼을 항상 보이게 둔다. 아이콘·라벨은
+                 syncBannerPauseButton이 상태에 맞춰 채운다. -->
+            <button class="rail-ad-arrow rail-ad-pause" type="button" aria-pressed="false"
+                    style="flex: 0 0 auto; width: 44px; height: 44px; opacity: 1;"
+                    onclick="toggleBannerRotationPause()"></button>
         </div>
     ` : '';
 
@@ -1028,13 +1083,22 @@ function renderRightRailAd({ restartRotation = true } = {}) {
         bannerTrackPosition = activeBannerSlideIndex + 1;
         setBannerTrackPosition(bannerTrackPosition, { animate: false });
         syncBannerIndicator();
+        syncBannerPauseButton();
         container.onmouseenter = stopBannerRotation;
         container.onmouseleave = restartBannerRotationIfIdle;
+        // 키보드로 배너 안을 다니는 동안에도 호버와 같게 회전을 멈춘다.
+        container.onfocusin = stopBannerRotation;
+        container.onfocusout = event => {
+            if (container.contains(event.relatedTarget)) return;
+            restartBannerRotationIfIdle();
+        };
         if (restartRotation) startBannerRotation();
     } else {
         stopBannerRotation();
         container.onmouseenter = null;
         container.onmouseleave = null;
+        container.onfocusin = null;
+        container.onfocusout = null;
     }
 }
 
@@ -1525,24 +1589,9 @@ function jumpToNoticeSearch() {
 }
 
 /* 왼쪽 위 메뉴 손잡이.
-   늘 떠 있으면 제목과 본문을 가리므로 평소에는 숨겨 둔다. 목록을 조금이라도
-   내리면 나타나고, 손을 떼고 잠시 두면 스스로 사라진다. 검색 줄이 함께 떠
-   있을 때는 그 줄 왼쪽에 나란히 서도록 자리를 옮긴다. */
-const MENU_HANDLE_IDLE_MS = 2600;
-let menuHandleHideTimer = null;
-
-function revealMobileMenuHandle() {
-    const handle = document.querySelector('.mobile-menu-btn');
-    if (!handle || getLayoutMode() !== 'mobile') return;
-    handle.classList.add('is-visible');
-    window.clearTimeout(menuHandleHideTimer);
-    menuHandleHideTimer = window.setTimeout(() => {
-        // 서랍이 열려 있는 동안에는 손잡이를 거두지 않는다.
-        if (isMobileDrawerOpen()) return;
-        handle.classList.remove('is-visible');
-    }, MENU_HANDLE_IDLE_MS);
-}
-
+   서랍으로 들어가는 유일한 문이라 숨기지 않고 항상 보여 둔다. 스크롤에 따라
+   숨었다 나타나게 하면 최상단에 멈춘 사용자는 진입점을 영영 찾지 못한다.
+   검색 줄이 함께 떠 있을 때는 그 줄 왼쪽에 나란히 서도록 자리만 옮긴다. */
 function syncMobileMenuHandlePosition() {
     const handle = document.querySelector('.mobile-menu-btn');
     const bar = document.getElementById('mobile-sticky-search');
@@ -1553,18 +1602,8 @@ function syncMobileMenuHandlePosition() {
 
 function watchMobileStickySearch() {
     if (!document.getElementById('mobile-sticky-search')) return;
-    const onScroll = () => {
-        syncMobileStickySearch();
-        revealMobileMenuHandle();
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', syncMobileStickySearch, { passive: true });
     window.addEventListener('resize', syncMobileStickySearch, { passive: true });
-    // 손잡이를 만지는 동안에는 사라지지 않게 시계를 다시 돌린다.
-    document.querySelector('.mobile-menu-btn')
-        ?.addEventListener('pointerenter', revealMobileMenuHandle);
-    // 맨 위에서는 스크롤이 없어 아무 신호도 오지 않는다. 처음 한 번 보여 줘
-    // 메뉴가 있다는 것만 알리고 곧 거둔다.
-    revealMobileMenuHandle();
     syncMobileStickySearch();
 }
 
@@ -1745,15 +1784,68 @@ function formatNoticeTargetBadge(notice) {
 // 🎨 모달
 // ========================================
 
+/* 모달이 열려 있는 동안 초점을 다이얼로그 안에 가두고, 닫히면 열었던
+   자리로 돌려준다. 배경 스크롤 잠금(body.modal-open)도 여기서 함께 맡아
+   어떤 경로로 여닫아도 상태가 어긋나지 않는다. */
+const MODAL_FOCUSABLE_SELECTOR = 'a[href], button, input, select, textarea, [tabindex]';
+const modalFocusState = new Map();
+
+function modalFocusables(modal) {
+    return [...modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)]
+        .filter(el => !el.disabled && el.tabIndex !== -1 && el.getClientRects().length > 0);
+}
+
+function trapModalFocus(modal) {
+    if (modalFocusState.has(modal.id)) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onKeydown = event => {
+        if (event.key !== 'Tab') return;
+        const focusables = modalFocusables(modal);
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey && (active === first || !modal.contains(active))) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && (active === last || !modal.contains(active))) {
+            event.preventDefault();
+            first.focus();
+        }
+    };
+    modal.addEventListener('keydown', onKeydown);
+    modalFocusState.set(modal.id, { opener, onKeydown });
+    modalFocusables(modal)[0]?.focus();
+}
+
+function releaseModalFocus(modal) {
+    const state = modalFocusState.get(modal.id);
+    if (!state) return;
+    modalFocusState.delete(modal.id);
+    modal.removeEventListener('keydown', state.onKeydown);
+    if (state.opener?.isConnected) state.opener.focus();
+}
+
+function syncModalOpenState() {
+    const anyOpen = [...document.querySelectorAll('.overlay')]
+        .some(el => el.style.display === 'flex');
+    document.body.classList.toggle('modal-open', anyOpen);
+}
+
 function openModal(id) {
     const modal = document.getElementById(id);
-    if (modal) modal.style.display = 'flex';
+    if (!modal || modal.style.display === 'flex') return;
+    modal.style.display = 'flex';
+    trapModalFocus(modal);
+    syncModalOpenState();
 }
 
 function closeModal(id) {
     const modal = document.getElementById(id);
-    if (!modal) return;
+    if (!modal || modal.style.display !== 'flex') return;
     modal.style.display = 'none';
+    releaseModalFocus(modal);
+    syncModalOpenState();
 }
 
 function openContactFromRail() {
@@ -1941,7 +2033,9 @@ async function reportSummaryMismatch(id, button) {
 
 window.onclick = function(event) {
     if (event.target.classList?.contains('overlay')) {
-        event.target.style.display = 'none';
+        // display만 끄면 스크롤 잠금과 초점 복원이 새어 나간다. 닫기 경로를 하나로 모은다.
+        if (event.target.id === 'notification-modal') closeNotificationPreferences();
+        else closeModal(event.target.id);
     }
 }
 
@@ -1988,12 +2082,15 @@ async function openNoticeFromUrl() {
         try {
             await getNoticeDetail(requestedId);
             exists = true;
-        } catch {
-            // 아래의 사용자 안내로 통합한다.
-        }
-        if (!exists) {
-            alert('링크에 해당하는 공지를 찾을 수 없습니다.\n삭제되었거나 주소가 잘못되었습니다.');
-            clearNoticeUrl();
+        } catch (error) {
+            // 404만 정말 없는 공지다. 회선 문제나 서버 오류까지 '삭제됨'으로
+            // 단정하면 안 되고, 주소를 지우면 새로고침 재시도 길도 사라진다.
+            if (error?.status === 404) {
+                alert('링크에 해당하는 공지를 찾을 수 없습니다.\n삭제되었거나 내려간 공지입니다.');
+                clearNoticeUrl();
+            } else {
+                alert('공지를 불러오지 못했습니다.\n네트워크 연결을 확인한 뒤 새로고침으로 다시 시도해주세요.');
+            }
             return;
         }
     }
@@ -2293,8 +2390,12 @@ function setNoticeSort(sort) {
 function toggleFilterBtn(btn) {
     const group = btn.dataset.group;
     const val = btn.dataset.val;
-    document.querySelectorAll(`[data-group="${group}"]`).forEach(b => b.classList.remove('active'));
+    document.querySelectorAll(`[data-group="${group}"]`).forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-pressed', 'false');
+    });
     btn.classList.add('active');
+    btn.setAttribute('aria-pressed', 'true');
     filterState[group] = val;
     filterCards();
     updateFilterChips();
@@ -2320,7 +2421,8 @@ function updateFilterChips() {
             hasActive = true;
             const chip = document.createElement('div');
             chip.className = 'filter-chip';
-            chip.innerHTML = `<span>${labelMap[group]}: ${val}</span><button onclick="event.stopPropagation(); resetFilterGroup('${group}')">×</button>`;
+            // host는 서버에서 온 기관명이다. 이스케이프 없이 innerHTML에 넣으면 XSS 싱크가 된다.
+            chip.innerHTML = `<span>${labelMap[group]}: ${escapeHtml(val)}</span><button onclick="event.stopPropagation(); resetFilterGroup('${group}')">×</button>`;
             chipsArea.appendChild(chip);
         }
     });
@@ -2346,7 +2448,7 @@ function updateFilterChips() {
         hasActive = true;
         const chip = document.createElement('div');
         chip.className = 'filter-chip';
-        chip.innerHTML = `<span>기간: ${dateFrom || '?'} ~ ${dateTo || '?'}</span><button onclick="event.stopPropagation(); clearDateRange()">×</button>`;
+        chip.innerHTML = `<span>마감일 범위: ${escapeHtml(dateFrom || '?')} ~ ${escapeHtml(dateTo || '?')}</span><button onclick="event.stopPropagation(); clearDateRange()">×</button>`;
         chipsArea.appendChild(chip);
     }
 
@@ -2373,7 +2475,11 @@ function updateFilterChips() {
 
 function resetFilterGroup(group) {
     filterState[group] = FILTER_DEFAULTS[group];
-    document.querySelectorAll(`[data-group="${group}"]`).forEach(b => { b.classList.toggle('active', b.dataset.val === FILTER_DEFAULTS[group]); });
+    document.querySelectorAll(`[data-group="${group}"]`).forEach(b => {
+        const active = b.dataset.val === FILTER_DEFAULTS[group];
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+    });
     if (group === 'host') {
         const hostFilter = document.getElementById('hostFilter');
         if (hostFilter) hostFilter.value = FILTER_DEFAULTS.host;
@@ -2410,7 +2516,11 @@ function clearCategoryFilters() {
 
 function resetAllFilters() {
     Object.keys(filterState).forEach(g => { filterState[g] = FILTER_DEFAULTS[g]; });
-    document.querySelectorAll('.filter-btn').forEach(b => { b.classList.toggle('active', b.dataset.val === FILTER_DEFAULTS[b.dataset.group]); });
+    document.querySelectorAll('.filter-btn').forEach(b => {
+        const active = b.dataset.val === FILTER_DEFAULTS[b.dataset.group];
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+    });
     selectedCategoryFilters.clear();
     archiveTabActive = false;
     Object.keys(quickNoticeFilters).forEach(key => { quickNoticeFilters[key] = false; });
@@ -2504,7 +2614,8 @@ function renderNoticeCards(animate = false) {
     const blockSet = new Set(blockIds);
     renderCompareSpace(blockIds);
 
-    const filtered = notices;
+    // 딥링크로만 불러온 공지(outsideCurrentList)는 목록 질의의 결과가 아니므로 그리드에서 뺀다.
+    const filtered = notices.filter(notice => !notice.outsideCurrentList);
 
     const baseNotices = filtered.filter(notice => !blockSet.has(String(notice.id)));
     baseNotices.forEach(notice => {
@@ -2563,10 +2674,20 @@ function renderNoticeCards(animate = false) {
         }
         card.dataset ||= {};
         card.dataset.noticeId = String(notice.id);
+        // div 카드는 키보드로 열 수 없다. 버튼 역할과 탭 정지, Enter/Space를 채워
+        // 마우스 없이도 상세로 들어가게 한다.
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+        card.setAttribute('aria-label', `공지 열기: ${rawTitle}`);
         card.onclick = () => {
             if (noticeDragInProgress || Date.now() < suppressNoticeClickUntil) return;
             openDetail(notice.id);
         };
+        card.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            card.click();
+        });
         card.addEventListener('mouseenter', () => queueNoticeHoverPreview(notice.id, card));
         card.addEventListener('mouseleave', () => cancelNoticeHoverPreview(notice.id));
         // 노션처럼: 6점 핸들만 드래그하고, 카드는 평소처럼 눌러 상세를 연다.
@@ -2627,6 +2748,14 @@ function renderNoticeCards(animate = false) {
     updateNoticeResultCount();
 }
 
+/* 시각 표시와 별개로, 목록이 바뀐 결과를 보조기기에 알리는 통로.
+   같은 문장을 다시 넣으면 낭독이 반복되므로 바뀔 때만 쓴다. */
+function announceNoticeListStatus(message) {
+    const live = document.getElementById('notice-list-live');
+    if (!live || live.textContent === message) return;
+    live.textContent = message || '';
+}
+
 /* "결과 N건"은 사용자가 검색하거나 필터를 걸었을 때만 의미가 있다.
    아무 조건도 걸지 않은 기본 목록에서는 전체 건수를 다시 알려줄 필요가 없다. */
 function updateNoticeResultCount() {
@@ -2636,6 +2765,7 @@ function updateNoticeResultCount() {
     const show = total > 0 && hasActiveNoticeQuery();
     countEl.hidden = !show;
     countEl.innerHTML = show ? `결과 <strong>${total}</strong>건` : '';
+    announceNoticeListStatus(hasActiveNoticeQuery() ? `검색 결과 ${total}건` : '');
     // 모바일에서 왼쪽 열을 정렬 버튼 줄까지 끌어올리는데, 결과 건수가
     // 바로 그 자리에 들어서므로 보일 때는 끌어올리지 않는다.
     document.getElementById('notice-grid')?.classList.toggle('has-result-count', show);
@@ -2708,12 +2838,24 @@ async function filterCards() {
         const result = await loadNoticePage(requestedPage);
         if (requestVersion !== noticeListRequestVersion) return;
         notices = result.notices;
+        // 새 결과에 없는 비교 블록은 화면에서 사라진 채 배열에만 남아
+        // 빈 분할 화면과 '최대 4개' 제한을 유령처럼 차지한다. 여기서 걷어낸다.
+        if (compareBlocks.length > 0) {
+            compareBlocks = compareBlocks.filter(id =>
+                notices.some(n => String(n.id) === String(id)));
+            if (compareBlocks.length === 0) {
+                compareWorkspaceOpen = false;
+                compareLayoutMode = 'stack';
+                expandedCompareBlocks.clear();
+            }
+        }
         buildHostButtons();
         renderNoticeCards(animate);
         syncNoticeListUrl(result.pagination.page);
     } catch (error) {
         if (requestVersion !== noticeListRequestVersion) return;
         console.error('공지 필터 적용 실패:', error);
+        announceNoticeListStatus('공지 목록을 불러오지 못했습니다. 다시 시도 버튼을 눌러 주세요.');
         const grid = document.getElementById('notice-grid');
         if (grid) {
             grid.innerHTML = `
@@ -2758,14 +2900,20 @@ function navDetailImage(dir, event) {
 
 function startImageSwipe(event) {
     imageSwipeStartX = event.touches?.[0]?.clientX ?? null;
+    imageSwipeStartY = event.touches?.[0]?.clientY ?? null;
 }
 
 function endImageSwipe(event, scope) {
     if (imageSwipeStartX === null) return;
     const endX = event.changedTouches?.[0]?.clientX ?? imageSwipeStartX;
+    const endY = event.changedTouches?.[0]?.clientY ?? imageSwipeStartY;
     const delta = endX - imageSwipeStartX;
+    const deltaY = imageSwipeStartY === null ? 0 : endY - imageSwipeStartY;
     imageSwipeStartX = null;
-    if (Math.abs(delta) < 44) return;
+    imageSwipeStartY = null;
+    // 본문을 세로로 스크롤하다 대각선으로 흐른 손짓은 사진 넘김이 아니다.
+    // 가로가 세로보다 확실히 클 때만 스와이프로 본다.
+    if (Math.abs(delta) < 44 || Math.abs(delta) <= Math.abs(deltaY)) return;
     const direction = delta < 0 ? 1 : -1;
     if (scope === 'viewer') navImage(direction);
     else navDetailImage(direction);
@@ -2901,26 +3049,33 @@ function hideNoticeLoading() {
 async function openDetail(idStr) {
     cancelNoticeHoverPreview();
     currentViewId = String(idStr);
+    // 카드를 연달아 누르면 늦게 도착한 앞 요청이 나중 화면을 덮어쓴다.
+    // 응답이 왔을 때 이 id가 여전히 최신 요청일 때만 그린다.
+    const requestedViewId = currentViewId;
     let notice;
     // 느린 회선에서는 상세가 오기까지 몇 초씩 걸린다. 그동안 아무 반응이
     // 없으면 눌리지 않은 줄 알고 다시 누르게 되므로 불러오는 중임을 알린다.
     showNoticeLoading();
     try {
-        notice = await getNoticeDetail(currentViewId);
+        notice = await getNoticeDetail(requestedViewId);
     } catch (error) {
+        if (currentViewId !== requestedViewId) return;
         console.error('공지 상세 불러오기 실패:', error);
         hideNoticeLoading();
         alert('공지 상세를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
         return;
     } finally {
-        hideNoticeLoading();
+        // 다른 공지를 여는 중이면 로딩 표시는 그쪽 몫이라 여기서 끄지 않는다.
+        if (currentViewId === requestedViewId || currentViewId === null) hideNoticeLoading();
     }
+    // 다른 공지를 이미 열었거나 목록으로 돌아갔으면 이 응답은 버린다.
+    if (currentViewId !== requestedViewId) return;
 
     notice.views = (notice.views || 0) + 1;
     const datePresentation = getNoticeDatePresentation(notice);
     renderNoticeCards();
 
-    apiRequest(`/api/notices/${currentViewId}/view`, { method: 'POST' })
+    apiRequest(`/api/notices/${requestedViewId}/view`, { method: 'POST' })
         .then(result => {
             if (!result?.notice) return;
             const freshIdx = notices.findIndex(n => String(n.id) === String(result.notice.id));
@@ -3041,6 +3196,9 @@ function showBoardView() {
 // 상세에서 목록으로 돌아온다. 주소창의 ?id= 도 지운다.
 function closeDetail() {
     if (new URLSearchParams(location.search).has(NOTICE_URL_PARAM) && detailHistoryPushed) {
+        // history.back()은 비동기라 popstate가 오기 전 ESC 연타가 이 분기를
+        // 다시 통과하면 두 칸 뒤로 밀린다. 부르기 전에 먼저 꺼서 한 번만 가게 한다.
+        detailHistoryPushed = false;
         history.back();
         return;
     }
@@ -3865,6 +4023,17 @@ function pushSupported() {
         && 'Notification' in window;
 }
 
+// iOS 사파리는 홈 화면에 설치한 웹앱에서만 PushManager를 노출한다.
+// '지원 안 함'이 아니라 '설치하면 됨'을 안내해야 하는 경우를 가려낸다.
+function needsIosInstallGuide() {
+    const isIosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!isIosDevice) return false;
+    const standalone = navigator.standalone === true
+        || window.matchMedia?.('(display-mode: standalone)')?.matches === true;
+    return !standalone;
+}
+
 function base64UrlToBytes(value) {
     const padding = '='.repeat((4 - value.length % 4) % 4);
     const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -3876,7 +4045,42 @@ function isPushSubscribed() {
     return Boolean(localStorage.getItem('ecePushSubscriptionId'));
 }
 
-// 종은 구독 상태를 그대로 비춘다. 꺼짐이면 흑백, 켜짐이면 노란색.
+function clearLocalPushState() {
+    localStorage.removeItem('ecePushSubscriptionId');
+    localStorage.removeItem('ecePushManagementToken');
+}
+
+// 저장한 선호를 기기에 남겨 두었다가 모달을 다시 열 때 폼에 되살린다.
+// 이게 없으면 재저장 때마다 빈 폼이 기존 설정을 서버에서 덮어쓴다.
+const PUSH_PREFERENCES_STORAGE_KEY = 'ecePushPreferences';
+
+function readStoredNotificationPreferences() {
+    try {
+        const raw = localStorage.getItem(PUSH_PREFERENCES_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+}
+
+function applyStoredNotificationPreferences() {
+    const stored = readStoredNotificationPreferences();
+    if (!stored) return;
+    document.getElementById('notification-year').value = stored.admissionYear || '';
+    document.getElementById('notification-all').checked = Boolean(stored.allNotices);
+    document.getElementById('notification-urgent').checked = stored.urgentEnabled !== false;
+    document.getElementById('notification-reminder').value = stored.deadlineReminderDays
+        ? String(stored.deadlineReminderDays)
+        : '';
+    const savedIds = new Set(
+        (Array.isArray(stored.categoryIds) ? stored.categoryIds : []).map(Number)
+    );
+    document.querySelectorAll('input[name="notification-category"]').forEach(input => {
+        input.checked = savedIds.has(Number(input.value));
+    });
+}
+
+// 종은 구독 상태를 그대로 비춘다. 꺼짐이면 회색 선, 켜짐이면 남색으로 찬다.
 function updateBellState() {
     const bell = document.getElementById('bell-toggle');
     if (!bell) return;
@@ -3912,12 +4116,17 @@ async function openNotificationPreferences() {
     if (typeof closeMobileDrawer === 'function') closeMobileDrawer();
     const modal = document.getElementById('notification-modal');
     if (!modal) return;
-    modal.style.display = 'flex';
+    openModal('notification-modal');
     modal.setAttribute('aria-hidden', 'false');
 
     const unsupported = document.getElementById('notification-unsupported');
     const form = document.getElementById('notification-form');
     if (!pushSupported()) {
+        const generic = document.getElementById('notification-unsupported-generic');
+        const iosGuide = document.getElementById('notification-unsupported-ios');
+        const showInstallGuide = needsIosInstallGuide();
+        if (generic) generic.hidden = showInstallGuide;
+        if (iosGuide) iosGuide.hidden = !showInstallGuide;
         unsupported.hidden = false;
         form.hidden = true;
         return;
@@ -3926,6 +4135,24 @@ async function openNotificationPreferences() {
     form.hidden = false;
 
     await loadNotificationCategories();
+    applyStoredNotificationPreferences();
+
+    // localStorage는 '구독 중'인데 브라우저 구독이 사라진 역방향 불일치를 정리한다.
+    // (사이트 데이터 일부 삭제, 브라우저의 자체 구독 만료 등) 그대로 두면
+    // 종은 켜져 있지만 알림은 오지 않는 상태가 영원히 이어진다.
+    if (isPushSubscribed()) {
+        try {
+            const registration = await navigator.serviceWorker.ready;
+            const browserSubscription = await registration.pushManager.getSubscription();
+            if (!browserSubscription) {
+                clearLocalPushState();
+                updateBellState();
+            }
+        } catch {
+            // 상태 확인 실패는 치명적이지 않다. 저장 시점에 다시 검증된다.
+        }
+    }
+
     document.getElementById('notification-delete').hidden = !isPushSubscribed();
     setNotificationStatus(isPushSubscribed()
         ? '이 브라우저는 이미 알림을 받고 있습니다. 설정을 바꾸고 저장하세요.'
@@ -3936,7 +4163,7 @@ async function openNotificationPreferences() {
 function closeNotificationPreferences() {
     const modal = document.getElementById('notification-modal');
     if (!modal) return;
-    modal.style.display = 'none';
+    closeModal('notification-modal');
     modal.setAttribute('aria-hidden', 'true');
 }
 
@@ -3944,17 +4171,66 @@ function collectNotificationPreferences() {
     const categoryIds = Array.from(
         document.querySelectorAll('input[name="notification-category"]:checked')
     ).map(input => Number(input.value));
+    // 서버 normalizePreferences가 읽는 키 이름 그대로 보내야 한다.
+    // 다른 이름은 매핑 없이 조용히 버려진다.
     return {
-        year: document.getElementById('notification-year').value || null,
-        allCategories: document.getElementById('notification-all').checked,
+        admissionYear: document.getElementById('notification-year').value || null,
+        allNotices: document.getElementById('notification-all').checked,
         categoryIds,
-        includeUrgent: document.getElementById('notification-urgent').checked,
-        reminderDaysBefore: Number(document.getElementById('notification-reminder').value) || null
+        urgentEnabled: document.getElementById('notification-urgent').checked,
+        deadlineReminderDays: Number(document.getElementById('notification-reminder').value) || null
     };
+}
+
+// 기존 브라우저 구독이 지금 서버 키로 만들어졌는지 바이트 단위로 비교한다.
+function subscriptionKeyMatches(subscription, serverKeyBytes) {
+    const appliedKey = subscription.options?.applicationServerKey;
+    if (!appliedKey) return false;
+    const appliedBytes = new Uint8Array(appliedKey);
+    if (appliedBytes.length !== serverKeyBytes.length) return false;
+    return appliedBytes.every((byte, index) => byte === serverKeyBytes[index]);
+}
+
+// 이미 구독한 브라우저는 PUT으로 설정만 갱신한다. 서버 쪽 구독이 사라졌으면
+// (401/404) 남은 로컬 상태를 지우고 POST로 새로 만든다.
+// 브라우저 구독을 새로 만든 직후(endpoint가 바뀜)에는 PUT이 옛 endpoint 행만
+// 고치므로 건너뛰고, endpoint 기준 upsert인 POST로 바로 간다.
+async function upsertPushSubscription(subscription, preferences, { endpointChanged = false } = {}) {
+    const subscriptionId = localStorage.getItem('ecePushSubscriptionId');
+    const managementToken = localStorage.getItem('ecePushManagementToken');
+    if (!endpointChanged && subscriptionId && managementToken) {
+        try {
+            const updated = await apiRequest(`/api/push/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+                method: 'PUT',
+                headers: { 'x-subscription-token': managementToken },
+                body: JSON.stringify({ preferences })
+            });
+            if (updated?.subscription?.id) {
+                return { subscription: updated.subscription, managementToken };
+            }
+        } catch (error) {
+            if (error.status !== 401 && error.status !== 404) throw error;
+            clearLocalPushState();
+        }
+    }
+    return apiRequest('/api/push/subscriptions', {
+        method: 'POST',
+        body: JSON.stringify({
+            subscription: subscription.toJSON(),
+            preferences
+        })
+    });
 }
 
 async function saveNotificationPreferences() {
     if (!pushSupported()) return;
+    const preferences = collectNotificationPreferences();
+    // 전체 알림도 카테고리도 없는 구독은 어떤 공지와도 매칭되지 않는다.
+    // '저장 성공' 뒤 영원히 조용한 구독을 만들 바에는 여기서 막는다.
+    if (!preferences.allNotices && preferences.categoryIds.length === 0) {
+        setNotificationStatus('관심 카테고리를 하나 이상 고르거나 \'모든 카테고리 알림\'을 켜주세요.', true);
+        return;
+    }
     const button = document.getElementById('notification-save');
     button.disabled = true;
     setNotificationStatus('알림 권한을 확인하고 있습니다.');
@@ -3969,19 +4245,24 @@ async function saveNotificationPreferences() {
         if (!config?.publicKey) throw new Error('서버에 알림 키가 설정되어 있지 않습니다.');
 
         const registration = await navigator.serviceWorker.ready;
-        const existing = await registration.pushManager.getSubscription();
-        const subscription = existing || await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: base64UrlToBytes(config.publicKey)
-        });
+        const applicationServerKey = base64UrlToBytes(config.publicKey);
+        let subscription = await registration.pushManager.getSubscription();
+        // 서버 VAPID 키가 바뀌면 옛 키로 만든 구독은 발송이 영영 거부된다.
+        // 키가 다른 구독은 지우고 새 키로 다시 만들어 스스로 복구한다.
+        if (subscription && !subscriptionKeyMatches(subscription, applicationServerKey)) {
+            await subscription.unsubscribe();
+            subscription = null;
+        }
+        let endpointChanged = false;
+        if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey
+            });
+            endpointChanged = true;
+        }
 
-        const result = await apiRequest('/api/push/subscriptions', {
-            method: 'POST',
-            body: JSON.stringify({
-                subscription: subscription.toJSON(),
-                preferences: collectNotificationPreferences()
-            })
-        });
+        const result = await upsertPushSubscription(subscription, preferences, { endpointChanged });
 
         // 서버는 { subscription: { id, ... }, managementToken } 을 돌려준다.
         // 여기서 id를 놓치면 종은 계속 꺼진 채 저장만 성공한 것처럼 보인다.
@@ -3990,6 +4271,7 @@ async function saveNotificationPreferences() {
         }
         localStorage.setItem('ecePushSubscriptionId', String(result.subscription.id));
         if (result?.managementToken) localStorage.setItem('ecePushManagementToken', result.managementToken);
+        localStorage.setItem(PUSH_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
 
         document.getElementById('notification-delete').hidden = false;
         updateBellState();
@@ -4004,21 +4286,34 @@ async function saveNotificationPreferences() {
 async function unsubscribeNotifications() {
     const subscriptionId = localStorage.getItem('ecePushSubscriptionId');
     const managementToken = localStorage.getItem('ecePushManagementToken');
-    if (!subscriptionId || !managementToken) return;
     const button = document.getElementById('notification-delete');
+    if (!subscriptionId || !managementToken) {
+        // 토큰이 없으면 서버 구독을 지울 방법이 없다. 조용히 멈추는 대신
+        // 로컬 상태를 리셋해 다시 구독할 수 있는 길을 열어 준다.
+        clearLocalPushState();
+        if (button) button.hidden = true;
+        updateBellState();
+        setNotificationStatus('저장된 구독 정보가 없어 알림 상태를 초기화했습니다. 알림이 필요하면 다시 구독해주세요.', true);
+        return;
+    }
     button.disabled = true;
     setNotificationStatus('알림 구독을 해지하고 있습니다.');
     try {
-        await apiRequest(`/api/push/subscriptions/${encodeURIComponent(subscriptionId)}`, {
-            method: 'DELETE',
-            headers: { 'x-subscription-token': managementToken },
-            body: JSON.stringify({})
-        });
+        try {
+            await apiRequest(`/api/push/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+                method: 'DELETE',
+                headers: { 'x-subscription-token': managementToken },
+                body: JSON.stringify({})
+            });
+        } catch (error) {
+            // 서버에 이미 없는 구독(401/404)은 해지된 것과 같다.
+            // 회선 문제나 서버 오류(status 없음·5xx)만 실패로 남긴다.
+            if (error.status !== 401 && error.status !== 404) throw error;
+        }
         const registration = await navigator.serviceWorker.ready;
         const browserSubscription = await registration.pushManager.getSubscription();
         await browserSubscription?.unsubscribe();
-        localStorage.removeItem('ecePushSubscriptionId');
-        localStorage.removeItem('ecePushManagementToken');
+        clearLocalPushState();
         button.hidden = true;
         updateBellState();
         setNotificationStatus('알림 구독을 해지했습니다.');
@@ -4062,11 +4357,15 @@ document.addEventListener('keydown', function(e) {
     }
     if (e.key !== 'Escape') return;
 
-    // ESC 우선순위: 폰 미리보기 → 알림 설정 → 상세 페이지
+    // ESC 우선순위: 폰 미리보기 → 알림 설정 → 피드백 → 베타 평가 → 상세 페이지
     if (document.getElementById('device-preview') && !document.getElementById('device-preview').hidden) {
         closeDevicePreview();
     } else if (document.getElementById('notification-modal')?.style.display === 'flex') {
         closeNotificationPreferences();
+    } else if (document.getElementById('contact-modal')?.style.display === 'flex') {
+        closeModal('contact-modal');
+    } else if (document.getElementById('beta-rating-modal')?.style.display === 'flex') {
+        closeBetaRatingPrompt();
     } else if (document.getElementById('notice-detail-view') && !document.getElementById('notice-detail-view').hidden) {
         closeDetail();
     }

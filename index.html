@@ -18,6 +18,7 @@
     <meta name="theme-color" content="#0d2a5e">
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="icon" href="./icons/app-icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
     <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet">
     <!-- 제목용 명조체. 한글은 unicode-range로 잘게 나뉘어 받아지고, swap이라 늦어도 화면을 막지 않는다. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -123,6 +124,17 @@
                  onerror="this.remove(); document.getElementById('site-title')?.classList.add('is-text');">
             <span class="site-title-text">SNU ECE 공지방</span>
         </h1>
+        <!-- 제목 옆 알림 종. 구독 상태를 비추고, 누르면 알림 설정이 열린다.
+             첫 path가 종 몸통이라 켜짐 스타일(svg path:first-child)이 안쪽을 채운다. -->
+        <button id="bell-toggle" class="bell-toggle" type="button" aria-pressed="false"
+                aria-label="공지 알림 받기" title="공지 알림 받기"
+                onclick="openNotificationPreferences()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M18 9.2a6 6 0 1 0-12 0c0 4.4-1.6 5.8-2.4 6.5-.4.4-.1 1 .4 1h16c.5 0 .8-.6.4-1-.8-.7-2.4-2.1-2.4-6.5Z"/>
+                <path stroke-linecap="round" d="M10 19.7a2 2 0 0 0 4 0"/>
+            </svg>
+        </button>
     </div>
 
     <div class="header-actions">
@@ -141,8 +153,10 @@
     <!-- 검색바. 대상 학번은 상세 필터에서만 조정한다. -->
     <div class="search-container" role="search">
         <label class="search-field" for="searchInput">
+            <!-- keyup은 ✕ 지우기 버튼·마우스 붙여넣기·드롭을 놓친다. input은 값이
+                 바뀌는 모든 경로에서 발생한다. -->
             <input type="search" id="searchInput" placeholder="공지 제목과 내용을 검색해보세요"
-                   autocomplete="off" onkeyup="scheduleNoticeSearch()">
+                   autocomplete="off" oninput="scheduleNoticeSearch()">
             <button class="search-submit" type="button" id="search-guide-btn"
                     onclick="openUserGuide(event)" aria-label="사용 설명서 열기" title="사용 설명서">
                 <svg width="23" height="23" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24" aria-hidden="true">
@@ -211,11 +225,11 @@
             <div class="filter-group">
                 <div class="filter-group-label">마감 상태</div>
                 <div class="filter-btn-group" id="fg-deadline-status">
-                    <button class="filter-btn active" data-group="deadline-status" data-val="전체" onclick="toggleFilterBtn(this)">전체</button>
-                    <button class="filter-btn" data-group="deadline-status" data-val="진행중" onclick="toggleFilterBtn(this)">진행 중</button>
-                    <button class="filter-btn" data-group="deadline-status" data-val="마감임박" onclick="toggleFilterBtn(this)">마감 임박 (D-3 이내)</button>
-                    <button class="filter-btn" data-group="deadline-status" data-val="상시" onclick="toggleFilterBtn(this)">상시</button>
-                    <button class="filter-btn" data-group="deadline-status" data-val="마감됨" onclick="toggleFilterBtn(this)">마감됨</button>
+                    <button class="filter-btn active" data-group="deadline-status" data-val="전체" aria-pressed="true" onclick="toggleFilterBtn(this)">전체</button>
+                    <button class="filter-btn" data-group="deadline-status" data-val="진행중" aria-pressed="false" onclick="toggleFilterBtn(this)">진행 중</button>
+                    <button class="filter-btn" data-group="deadline-status" data-val="마감임박" aria-pressed="false" onclick="toggleFilterBtn(this)">마감 임박 (D-3 이내)</button>
+                    <button class="filter-btn" data-group="deadline-status" data-val="상시" aria-pressed="false" onclick="toggleFilterBtn(this)">상시</button>
+                    <button class="filter-btn" data-group="deadline-status" data-val="마감됨" aria-pressed="false" onclick="toggleFilterBtn(this)">마감됨</button>
                 </div>
             </div>
 
@@ -245,10 +259,10 @@
             <div class="filter-group">
                 <div class="filter-group-label">조회수</div>
                 <div class="filter-btn-group" id="fg-views">
-                    <button class="filter-btn active" data-group="views" data-val="전체" onclick="toggleFilterBtn(this)">전체</button>
-                    <button class="filter-btn" data-group="views" data-val="100이상" onclick="toggleFilterBtn(this)">100+</button>
-                    <button class="filter-btn" data-group="views" data-val="50이상" onclick="toggleFilterBtn(this)">50+</button>
-                    <button class="filter-btn" data-group="views" data-val="10미만" onclick="toggleFilterBtn(this)">10 미만</button>
+                    <button class="filter-btn active" data-group="views" data-val="전체" aria-pressed="true" onclick="toggleFilterBtn(this)">전체</button>
+                    <button class="filter-btn" data-group="views" data-val="100이상" aria-pressed="false" onclick="toggleFilterBtn(this)">100+</button>
+                    <button class="filter-btn" data-group="views" data-val="50이상" aria-pressed="false" onclick="toggleFilterBtn(this)">50+</button>
+                    <button class="filter-btn" data-group="views" data-val="10미만" aria-pressed="false" onclick="toggleFilterBtn(this)">10 미만</button>
                 </div>
             </div>
 
@@ -280,7 +294,10 @@
 </div>
 
 <div class="notice-results-toolbar" aria-label="공지 결과와 정렬">
-    <span class="filter-result-count" id="filter-result-count" aria-live="polite"></span>
+    <!-- 낭독은 아래 sr-only 리전이 도맡는다. 여기까지 polite면 같은 결과가 두 번 읽힌다. -->
+    <span class="filter-result-count" id="filter-result-count" aria-live="off"></span>
+    <!-- 검색 결과 건수와 목록 로드 실패를 보조기기에 알리는 보이지 않는 통로. -->
+    <span class="sr-only" id="notice-list-live" role="status"></span>
     <div class="notice-sort-chips" id="notice-sort-chips" aria-label="공지 정렬">
         <!-- 활성 표시는 버튼 배경이 아니라 이 알약 하나가 미끄러져 옮겨 다닌다.
              transform만 바뀌므로 레이아웃을 다시 계산하지 않아 끊기지 않는다. -->
@@ -345,7 +362,14 @@
     </section>
 
     <section class="notice-base-block" id="notice-base-block" aria-label="공지 목록">
-        <div class="grid" id="notice-grid"></div>
+        <div class="grid" id="notice-grid">
+            <!-- 첫 목록 응답이 오기 전까지만 보이는 자리표시.
+                 렌더와 오류 처리가 innerHTML을 갈아끼우며 자연히 지워진다. -->
+            <div class="notice-empty-state" id="notice-initial-loading" aria-live="polite">
+                <strong>공지를 불러오는 중…</strong>
+                <p>잠시만 기다려주세요.</p>
+            </div>
+        </div>
         <nav class="notice-pagination" id="notice-pagination" aria-label="공지 페이지">
             <button type="button" id="notice-page-prev" aria-label="이전 페이지" title="이전 페이지"
                     onclick="goToPreviousNoticePage()">&lt;</button>
@@ -428,7 +452,9 @@
     <!-- 모바일에서는 흐름 안에 놓여 공지와 푸터 사이에 선다.
          데스크탑에서는 position: fixed라 여기 있어도 오른쪽에 고정된다. -->
     <aside class="site-rail ad-rail rail-right" id="right-ad-rail" aria-label="학내 홍보">
-        <div id="right-rail-ad-content" aria-live="polite"></div>
+        <!-- 6.5초마다 도는 배너가 polite 리전이면 스크린리더 낭독이 계속 끊긴다.
+             자동 갱신은 알리지 않는다. -->
+        <div id="right-rail-ad-content" aria-live="off"></div>
     </aside>
 
     <footer class="site-footer" aria-label="사이트 정보">
@@ -519,7 +545,8 @@
 </div>
 
 <div class="overlay" id="contact-modal">
-    <div class="modal feedback-modal" onclick="event.stopPropagation()">
+    <div class="modal feedback-modal" role="dialog" aria-modal="true" aria-labelledby="feedback-title"
+         onclick="event.stopPropagation()">
         <button class="close-btn" onclick="closeModal('contact-modal')">×</button>
         <h2 id="feedback-title" style="margin-top: 0; font-weight: 800;">익명 피드백</h2>
         <p class="feedback-help" id="feedback-help">이름·연락처·IP를 저장하지 않습니다.
@@ -600,10 +627,15 @@
         <button class="close-btn" type="button" aria-label="알림 설정 닫기" onclick="closeNotificationPreferences()">×</button>
         <p class="review-eyebrow">내 기기 맞춤 설정</p>
         <h2 id="notification-title">공지 알림 받기</h2>
-        <p class="notification-help">이 브라우저에서 웹 알림을 허용하면 선택한 학번과 카테고리에 맞는 새 공지를 알려드립니다. 알림이 켜지면 제목 옆 종이 노란색으로 바뀝니다.</p>
+        <p class="notification-help">이 브라우저에서 웹 알림을 허용하면 선택한 학번과 카테고리에 맞는 새 공지를 알려드립니다. 알림이 켜지면 제목 옆 종이 남색으로 채워집니다.</p>
         <p id="notification-status" class="review-status" aria-live="polite"></p>
         <div id="notification-unsupported" class="review-empty" hidden>
-            이 브라우저는 웹 푸시 알림을 지원하지 않습니다.
+            <p id="notification-unsupported-generic">이 브라우저는 웹 푸시 알림을 지원하지 않습니다.</p>
+            <!-- iOS 사파리는 홈 화면에 설치해야 푸시가 열린다. 막다른 안내 대신 길을 알려준다. -->
+            <p id="notification-unsupported-ios" hidden>
+                iPhone·iPad에서는 Safari 공유 버튼 → <strong>홈 화면에 추가</strong>로 앱을 설치한 뒤,
+                홈 화면의 앱에서 이 화면을 다시 열면 알림을 켤 수 있습니다.
+            </p>
         </div>
         <div id="notification-form">
             <div class="form-group">

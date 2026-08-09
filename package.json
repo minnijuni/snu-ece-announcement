@@ -12,7 +12,8 @@
     "prepare:public": "node scripts/prepare-public.mjs",
     "migrate:categories:dry-run": "node scripts/migrate-notice-categories.mjs",
     "migrate:categories": "node scripts/migrate-notice-categories.mjs --apply",
-    "reclassify:local": "node scripts/reclassify-local-notices.mjs"
+    "reclassify:local": "node scripts/reclassify-local-notices.mjs",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",
