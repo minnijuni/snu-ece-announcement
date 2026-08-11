@@ -66,21 +66,24 @@ struct Notice: Identifiable, Equatable {
     }
 }
 
-struct NoticeAttachment: Equatable, Decodable {
+struct NoticeAttachment: Equatable, Codable {
     var name: String?
     var url: String?
 
     var displayName: String { name?.trimmed.nilIfEmpty ?? "첨부파일" }
 }
 
-// MARK: - Decoding
+// MARK: - Codable
 
-extension Notice: Decodable {
+/// 디코딩은 서버 응답의 빈틈을 받아 주느라 손으로 쓴다. 인코딩은 `NoticeCache`가
+/// 디스크 저장에 쓰는데, 케이스 이름이 전부 속성 이름과 같아야 컴파일러가
+/// 합성해 준다. `thumbnailPath`만 서버 키(`thumbnailUrl`)와 달라 원시값으로 잇는다.
+extension Notice: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, title, target, targets, host, deadline, deadlineAt, startDate, expiresAt
         case isAlwaysOpen, isPinned, category, hasReward, rewardNote, requiresAction, surveyReward
         case isArchived, isInGracePeriod, aiSummary, keywords, categoryIds, views
-        case sourcePublishedAt, createdAt, updatedAt, hasImages, thumbnailUrl
+        case sourcePublishedAt, createdAt, updatedAt, hasImages, thumbnailPath = "thumbnailUrl"
         case content, images, attachments, sourceUrl
     }
 
@@ -122,7 +125,7 @@ extension Notice: Decodable {
         createdAt = try? container.decodeIfPresent(String.self, forKey: .createdAt)
         updatedAt = try? container.decodeIfPresent(String.self, forKey: .updatedAt)
         hasImages = try? container.decodeIfPresent(Bool.self, forKey: .hasImages)
-        thumbnailPath = try? container.decodeIfPresent(String.self, forKey: .thumbnailUrl)
+        thumbnailPath = try? container.decodeIfPresent(String.self, forKey: .thumbnailPath)
         content = try? container.decodeIfPresent(String.self, forKey: .content)
         images = try? container.decodeIfPresent([String].self, forKey: .images)
         attachments = try? container.decodeIfPresent([NoticeAttachment].self, forKey: .attachments)
@@ -143,7 +146,7 @@ struct NoticeListResponse: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         notices = (try? container.decode([Notice].self, forKey: .notices)) ?? []
         pagination = (try? container.decode(NoticePagination.self, forKey: .pagination))
-            ?? NoticePagination(page: 1, limit: notices.count, total: notices.count, totalPages: 1)
+            ?? .singlePage(count: notices.count)
         facets = try? container.decodeIfPresent(NoticeFacets.self, forKey: .facets)
     }
 }
@@ -155,6 +158,11 @@ struct NoticePagination: Decodable, Equatable {
     var totalPages: Int
 
     static let empty = NoticePagination(page: 1, limit: 16, total: 0, totalPages: 0)
+
+    /// 목록 전체가 한 쪽에 다 담긴 경우. 캐시 폴백과 pagination 없는 응답이 쓴다.
+    static func singlePage(count: Int) -> NoticePagination {
+        NoticePagination(page: 1, limit: count, total: count, totalPages: 1)
+    }
 }
 
 struct NoticeFacets: Decodable, Equatable {

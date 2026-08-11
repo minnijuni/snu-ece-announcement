@@ -53,7 +53,9 @@ final class BoardRefreshTests: XCTestCase {
     /// 취소된 새로고침은 오류가 아니다. 화면에 오류를 띄우지 않는다.
     func testCancelledRefreshDoesNotSurfaceAnError() async throws {
         let service = SlowService(deliver: try makeResponse(ids: [1, 2]))
-        let board = BoardViewModel(service: service)
+        // cache: nil — 테스트는 앱 샌드박스에 실리므로, 캐시를 살려 두면
+        // 가짜 공지가 실제 앱의 오프라인 캐시 파일에 적힌다.
+        let board = BoardViewModel(service: service, cache: nil)
 
         let task = Task { await board.refresh() }
         try await Task.sleep(for: .milliseconds(80))
@@ -66,7 +68,7 @@ final class BoardRefreshTests: XCTestCase {
     /// 취소된 새로고침이 이미 받아 둔 목록을 지워서도 안 된다.
     func testCancelledRefreshKeepsTheListOnScreen() async throws {
         let service = SlowService(deliver: try makeResponse(ids: [1, 2, 3]))
-        let board = BoardViewModel(service: service)
+        let board = BoardViewModel(service: service, cache: nil)
 
         // 먼저 한 번 제대로 받아 둔다.
         service.failWithRealError = false
@@ -90,7 +92,7 @@ final class BoardRefreshTests: XCTestCase {
             notices: [], pagination: .empty, facets: nil
         ))
         service.failWithRealError = true
-        let board = BoardViewModel(service: service)
+        let board = BoardViewModel(service: service, cache: nil)
 
         await board.reload(page: 1)
 

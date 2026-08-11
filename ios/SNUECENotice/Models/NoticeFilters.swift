@@ -79,6 +79,14 @@ struct NoticeFilters: Equatable {
         !searchText.trimmed.isEmpty || hasDetailedFilters || !selectedCategoryIds.isEmpty
     }
 
+    /// 아무 조건도 정렬 변경도 없는 기본 최신순 목록인지. 오프라인 텍스트
+    /// 캐시(`NoticeCache`)는 이 상태의 응답만 적재하고, 이 상태의 첫 화면만
+    /// 캐시로 대신 채운다. 조회순·마감임박순 쪽을 섞으면 "최근 공지"라는
+    /// 캐시의 뜻이 흐려진다.
+    var isDefaultLatestFeed: Bool {
+        !hasActiveQuery && sort == .latest
+    }
+
     /// 검색어를 뺀 나머지 조건이 걸려 있는지.
     var hasDetailedFilters: Bool {
         target != "전체"

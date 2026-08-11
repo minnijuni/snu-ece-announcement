@@ -25,6 +25,9 @@ final class BoardViewModel: ObservableObject {
     @Published private(set) var selectedCategorySlug = "all"
 
     let service: NoticeServing
+    /// 오프라인 폴백용 텍스트 캐시. 단위 테스트는 nil을 넣어 실제 앱의
+    /// Caches 디렉터리에 가짜 공지가 적히는 일을 막는다.
+    private let cache: NoticeCache?
 
     /// 늦게 도착한 응답이 최신 목록을 덮어쓰지 않게 하는 표.
     /// 웹 `noticeListRequestVersion`과 같은 구실이다.
@@ -34,8 +37,9 @@ final class BoardViewModel: ObservableObject {
     /// 검색어를 입력하는 동안 매 글자마다 서버를 부르지 않는다.
     private static let searchDebounce = Duration.milliseconds(220)
 
-    init(service: NoticeServing = NoticeService()) {
+    init(service: NoticeServing = NoticeService(), cache: NoticeCache? = .shared) {
         self.service = service
+        self.cache = cache
     }
 
     var orderedCategories: [NoticeCategory] {
@@ -103,6 +107,9 @@ final class BoardViewModel: ObservableObject {
             if let facets = result.facets, !facets.hosts.isEmpty {
                 hosts = facets.hosts.sorted { $0.compare($1, locale: DateFormatting.koreanLocale) == .orderedAscending }
             }
+            if filters.isDefaultLatestFeed, let cache {
+                await cache.merge(result.notices)
+            }
         } catch {
             guard version == requestVersion else { return }
             let failure = error as? APIError ?? APIError.transport(error)
@@ -112,7 +119,11 @@ final class BoardViewModel: ObservableObject {
             // 이미 받아 둔 목록이 있으면 지우지 않는다. 새로고침 한 번 실패했다고
             // 보고 있던 공지가 사라지면, 오프라인에서 읽던 사람이 화면을 통째로 잃는다.
             if notices.isEmpty {
-                pagination = .empty
+                // 첫 화면조차 못 받았다면(콜드 스타트에 오프라인) 텍스트 캐시로
+                // 대신 채운다. 검색·필터가 걸린 상태는 캐시가 답할 수 없으니 그대로 둔다.
+                let cached = filters.isDefaultLatestFeed ? (await cache?.read() ?? []) : []
+                notices = cached
+                pagination = cached.isEmpty ? .empty : .singlePage(count: cached.count)
             }
             loadError = failure
         }
