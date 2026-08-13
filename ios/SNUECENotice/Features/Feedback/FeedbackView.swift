@@ -117,7 +117,7 @@ struct FeedbackView: View {
             .overlay(alignment: .topTrailing) {
                 Button {
                     shots.removeAll { $0.id == shot.id }
-                    pickedItems.removeAll()
+                    pickedItems.removeAll { $0 == shot.item }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 17))
@@ -131,10 +131,15 @@ struct FeedbackView: View {
     private func load(_ items: [PhotosPickerItem]) async {
         var loaded: [FeedbackShot] = []
         for item in items.prefix(Self.maxShots) {
+            // 이미 변환해 둔 사진은 다시 읽지 않는다. 하나만 뺐을 때 남은 사진이 유지된다.
+            if let existing = shots.first(where: { $0.item == item }) {
+                loaded.append(existing)
+                continue
+            }
             guard let data = try? await item.loadTransferable(type: Data.self),
                   let image = UIImage(data: data),
                   let shrunk = image.shrunkJPEG(maxEdge: Self.maxEdge) else { continue }
-            loaded.append(FeedbackShot(image: shrunk.image, jpeg: shrunk.data))
+            loaded.append(FeedbackShot(item: item, image: shrunk.image, jpeg: shrunk.data))
         }
         shots = loaded
     }
@@ -172,6 +177,7 @@ struct FeedbackView: View {
 
 struct FeedbackShot: Identifiable {
     let id = UUID()
+    let item: PhotosPickerItem
     let image: UIImage
     let jpeg: Data
 }
