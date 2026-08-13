@@ -40,6 +40,7 @@ struct NoticeSearchField: View {
             }
             .buttonStyle(PressableStyle())
             .accessibilityLabel("사용 설명서 열기")
+            .tutorialTarget(.guideButton)
             .padding(.trailing, 5)
         }
         .frame(minHeight: 48)

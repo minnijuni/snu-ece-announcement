@@ -22,6 +22,7 @@ struct ResultsToolbar: View {
             Spacer(minLength: 0)
 
             SortChips(selected: sort, onSelect: onSelectSort)
+                .tutorialTarget(.sortChips)
         }
         .frame(minHeight: 34)
     }

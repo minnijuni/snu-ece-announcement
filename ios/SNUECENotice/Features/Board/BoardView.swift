@@ -16,8 +16,17 @@ struct BoardView: View {
     @State private var menuHandleVisible = false
     @State private var menuHideTask: Task<Void, Never>?
     @State private var isFilterExpanded = false
+    /// 사용 설명서 투어의 현재 단계. nil이면 꺼져 있다.
+    @State private var tutorialIndex: Int?
+    /// 투어가 빠른 조건 줄을 보여 주려고 필터를 대신 펼쳤는지. 끝나면 되돌린다.
+    @State private var tutorialExpandedFilters = false
 
     private static let searchAnchor = "notice-search"
+    private static let categoryAnchor = "tutorial-categories"
+    private static let sortAnchor = "tutorial-sort"
+    private static let gridAnchor = "tutorial-grid"
+    private static let bannerAnchor = "tutorial-banner"
+    private static let footerAnchor = "tutorial-footer"
     /// 손잡이가 스스로 숨기까지 기다리는 시간. 웹 `MENU_HANDLE_IDLE_MS`와 같다.
     private static let menuHandleIdle = Duration.milliseconds(2600)
 
@@ -33,9 +42,11 @@ struct BoardView: View {
                         selectedSlug: board.selectedCategorySlug,
                         onSelect: { board.selectCategory(slug: $0) }
                     )
+                    .tutorialTarget(.categoryTabs)
+                    .id(Self.categoryAnchor)
                     .padding(.bottom, 12)
 
-                    searchSection
+                    searchSection(scroller)
                         .id(Self.searchAnchor)
 
                     ResultsToolbar(
@@ -44,6 +55,7 @@ struct BoardView: View {
                         sort: board.filters.sort,
                         onSelectSort: { board.setSort($0) }
                     )
+                    .id(Self.sortAnchor)
                     .padding(.vertical, 4)
 
                     NoticeGrid(
@@ -54,6 +66,7 @@ struct BoardView: View {
                         thumbnailURL: { board.service.thumbnailURL(for: $0) },
                         onSelect: { router.openNotice(id: $0.id) }
                     )
+                    .id(Self.gridAnchor)
                     .padding(.top, 2)
 
                     emptyOrError
@@ -72,9 +85,12 @@ struct BoardView: View {
                     }
 
                     BannerCarouselView(slides: board.bannerSlides.displayableRightRail)
+                        .tutorialTarget(.banner)
+                        .id(Self.bannerAnchor)
                         .padding(.vertical, 4)
 
                     SiteFooterView(syncState: board.syncState)
+                        .id(Self.footerAnchor)
                 }
                 .padding(.horizontal, Theme.Metrics.pagePadding)
                 // 본문 폭을 스크롤 영역 폭에 못박는다. 안쪽 어느 한 조각이
@@ -98,33 +114,112 @@ struct BoardView: View {
             .onChange(of: router.scrollToSearchToken) { _, _ in
                 withAnimation { scroller.scrollTo(Self.searchAnchor, anchor: .top) }
             }
-        }
-        .toolbar(.hidden, for: .navigationBar)
-        // 내비게이션 바를 감췄으므로 본문이 상태 표시줄 아래로 흘러 들어가
-        // 시계와 글자가 겹친다. 그 자리만 흰 판으로 덮어 둔다.
-        .overlay(alignment: .top) { StatusBarBackdrop() }
-        .overlay(alignment: .top) { stickySearchBar }
-        .overlay(alignment: .topLeading) { floatingMenuHandle }
-        .overlay(alignment: .center) {
-            if board.isLoading && board.hasLoadedOnce {
-                LoadingOverlay(message: "공지를 불러오는 중입니다…")
-                    .transition(.opacity)
+            // 내비게이션 바를 감췄으므로 본문이 상태 표시줄 아래로 흘러 들어가
+            // 시계와 글자가 겹친다. 그 자리만 흰 판으로 덮어 둔다.
+            .overlay(alignment: .top) { StatusBarBackdrop() }
+            .overlay(alignment: .top) { stickySearchBar }
+            .overlay(alignment: .topLeading) { floatingMenuHandle }
+            .overlay(alignment: .center) {
+                if board.isLoading && board.hasLoadedOnce {
+                    LoadingOverlay(message: "공지를 불러오는 중입니다…")
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.18), value: board.isLoading)
+            // 사용 설명서 투어. 위 겹칠 것들까지 모두 덮도록 맨 마지막에 얹는다.
+            .overlayPreferenceValue(TutorialAnchorKey.self) { anchors in
+                if let step = tutorialIndex {
+                    TutorialOverlayView(
+                        index: step,
+                        anchors: anchors,
+                        onPrev: { tutorialGo(step - 1, scroller) },
+                        onNext: { tutorialGo(step + 1, scroller) },
+                        onSkip: { endTutorial() },
+                        onOpenDoc: {
+                            endTutorial()
+                            router.present(.userGuide)
+                        }
+                    )
+                }
             }
         }
-        .animation(.easeOut(duration: 0.18), value: board.isLoading)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    // MARK: - 사용 설명서 투어
+
+    /// 지금 단계가 왼쪽 위 손잡이를 짚고 있는지. 그동안은 손잡이가 스스로
+    /// 숨는 것을 막아 둔다 — 웹 튜토리얼이 `is-visible`을 붙잡아 두는 것과 같다.
+    private var tutorialHoldsMenuHandle: Bool {
+        tutorialIndex.map { TutorialStep.all[$0].target == .menuHandle } ?? false
+    }
+
+    private func tutorialGo(_ newIndex: Int, _ scroller: ScrollViewProxy) {
+        guard newIndex >= 0 else { return }
+        guard newIndex < TutorialStep.all.count else {
+            endTutorial()
+            return
+        }
+        let step = TutorialStep.all[newIndex]
+
+        // 빠른 조건 줄은 필터를 펼쳐야 화면에 생긴다. 투어가 대신 펼쳤으면 기억해 뒀다 되돌린다.
+        if step.target == .quickFilters, !isFilterExpanded {
+            tutorialExpandedFilters = true
+            withAnimation(.easeOut(duration: 0.22)) { isFilterExpanded = true }
+        }
+        if step.target == .menuHandle {
+            menuHideTask?.cancel()
+            withAnimation(.easeOut(duration: 0.2)) { menuHandleVisible = true }
+        }
+
+        withAnimation(.easeInOut(duration: 0.35)) {
+            tutorialIndex = newIndex
+            scrollTutorialTarget(step, scroller)
+        }
+    }
+
+    private func scrollTutorialTarget(_ step: TutorialStep, _ scroller: ScrollViewProxy) {
+        switch step.target {
+        case .searchField, .guideButton, .quickFilters, .filterToggle:
+            scroller.scrollTo(Self.searchAnchor, anchor: .top)
+        case .categoryTabs:
+            scroller.scrollTo(Self.categoryAnchor, anchor: .center)
+        case .sortChips:
+            scroller.scrollTo(Self.sortAnchor, anchor: .center)
+        case .noticeCard:
+            scroller.scrollTo(Self.gridAnchor, anchor: .top)
+        case .banner:
+            scroller.scrollTo(Self.bannerAnchor, anchor: .center)
+        case .footerLinks:
+            scroller.scrollTo(Self.footerAnchor, anchor: .center)
+        case .footerSync:
+            scroller.scrollTo(Self.footerAnchor, anchor: .top)
+        case .menuHandle, nil:
+            break // 화면에 붙박인 것과 마지막 인사는 굴릴 곳이 없다.
+        }
+    }
+
+    private func endTutorial() {
+        withAnimation(.easeOut(duration: 0.25)) { tutorialIndex = nil }
+        if tutorialExpandedFilters {
+            tutorialExpandedFilters = false
+            withAnimation(.easeOut(duration: 0.22)) { isFilterExpanded = false }
+        }
+        if menuHandleVisible { scheduleMenuHandleHide() }
     }
 
     // MARK: - 조각들
 
-    private var searchSection: some View {
+    private func searchSection(_ scroller: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             NoticeSearchField(
                 text: Binding(
                     get: { board.filters.searchText },
                     set: { board.searchTextChanged($0) }
                 ),
-                onGuide: { router.present(.userGuide) }
+                onGuide: { tutorialGo(0, scroller) }
             )
+            .tutorialTarget(.searchField)
 
             FilterToggleBar(
                 isExpanded: isFilterExpanded,
@@ -134,6 +229,7 @@ struct BoardView: View {
                 },
                 onRemoveChip: { board.clearChip($0) }
             )
+            .tutorialTarget(.filterToggle)
             .padding(.top, 8)
 
             if isFilterExpanded {
@@ -141,6 +237,7 @@ struct BoardView: View {
                     isOn: { board.filters.isOn($0) },
                     onToggle: { board.toggleQuickFilter($0) }
                 )
+                .tutorialTarget(.quickFilters)
                 .padding(.top, 5)
                 .transition(.move(edge: .top).combined(with: .opacity))
 
@@ -244,7 +341,7 @@ struct BoardView: View {
     /// 없는 것처럼 왼쪽 끝에 붙는다.
     @ViewBuilder
     private var floatingMenuHandle: some View {
-        if menuHandleVisible {
+        if menuHandleVisible || tutorialHoldsMenuHandle {
             Button {
                 router.openDrawer()
             } label: {
@@ -265,6 +362,7 @@ struct BoardView: View {
             }
             .buttonStyle(PressableStyle())
             .accessibilityLabel("메뉴 열기")
+            .tutorialTarget(.menuHandle)
             .padding(.leading, 10)
             .padding(.top, searchFieldHidden ? 12 : 10)
             .transition(.opacity.combined(with: .move(edge: .top)))

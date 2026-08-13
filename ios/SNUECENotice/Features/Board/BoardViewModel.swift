@@ -47,9 +47,12 @@ final class BoardViewModel: ObservableObject {
     }
 
     /// "결과 N건"을 보일지. 조건을 하나도 걸지 않은 기본 목록에서는
-    /// 전체 건수를 다시 알려줄 필요가 없다.
+    /// 전체 건수를 다시 알려줄 필요가 없다. 카테고리(메뉴)만 고른 목록도
+    /// 숨긴다 — 건수 줄이 서면 두 열이 같은 높이에서 시작해 어긋남이 사라지고,
+    /// 몇 번째 공지인지 눈으로 따라가기 어려워진다.
     var showsResultCount: Bool {
-        pagination.total > 0 && filters.hasActiveQuery
+        pagination.total > 0
+            && (!filters.searchText.trimmed.isEmpty || filters.hasDetailedFilters)
     }
 
     var isEmpty: Bool {

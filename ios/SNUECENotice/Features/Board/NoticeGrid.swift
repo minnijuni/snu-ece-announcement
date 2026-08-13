@@ -46,6 +46,8 @@ struct NoticeGrid: View {
                     thumbnailURL: thumbnailURL(notice),
                     onTap: { onSelect(notice) }
                 )
+                // 사용 설명서 투어는 맨 첫 카드 하나만 짚는다.
+                .tutorialTarget(notice.id == notices.first?.id ? .noticeCard : nil)
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)

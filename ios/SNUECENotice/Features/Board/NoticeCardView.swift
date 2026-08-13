@@ -2,11 +2,12 @@ import SwiftUI
 
 /// 공지 카드 한 장.
 ///
-/// featurejaewon부터 카드는 고정 비율이 아니라 **내용만큼 자란다**. 긴 제목과
-/// 날짜가 들어와도 잘라내지 않는다. 포스터(사진)는 154pt로 고정이고, 사진 없는
-/// 공지의 텍스트 포스터는 154pt를 바닥으로 제목만큼 자란다. 제목은 포스터
-/// 안에 크게 쓴 카드라도 본문 첫 줄에 한 번 더 적는다 — 목록을 아래로 훑을 때
-/// 태그 다음에 제목을 놓쳐 버리지 않게 하려는 것이다.
+/// featurejaewon부터 카드는 고정 비율이 아니라 **내용만큼 자란다**. 다만 카드는
+/// 미리보기이므로 텍스트에 상한을 둔다 — 본문 제목 2줄, 텍스트 포스터 제목 4줄.
+/// 포스터(사진)는 154pt로 고정이고, 사진 없는 공지의 텍스트 포스터는 154pt를
+/// 바닥으로 제목만큼(상한까지) 자란다. 제목은 포스터 안에 크게 쓴 카드라도 본문
+/// 첫 줄에 한 번 더 적는다 — 목록을 아래로 훑을 때 태그 다음에 제목을 놓쳐
+/// 버리지 않게 하려는 것이다.
 struct NoticeCardView: View {
     let notice: Notice
     let thumbnailURL: URL?
@@ -79,6 +80,7 @@ struct NoticeCardView: View {
                 .lineSpacing(PosterTitle.fontSize * (PosterTitle.lineHeight - 1))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.leading)
+                .lineLimit(4)
                 .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
@@ -104,13 +106,14 @@ struct NoticeCardView: View {
         VStack(alignment: .leading, spacing: 5) {
             tags
 
-            // 텍스트 포스터 카드도 본문에 제목을 다시 적는다. 줄 수 제한 없이
-            // 전부 보여주고, 카드가 그만큼 자란다.
+            // 텍스트 포스터 카드도 본문에 제목을 다시 적는다. 카드가 미리보기로
+            // 남도록 두 줄까지만 보여주고, 전문은 상세 화면에 맡긴다.
             Text(notice.title)
                 .font(Theme.Typography.sans(12.5, .bold))
                 .lineSpacing(2)
                 .foregroundStyle(Theme.Palette.textMain)
                 .multilineTextAlignment(.leading)
+                .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
             if !presentation.dateLabel.isEmpty {

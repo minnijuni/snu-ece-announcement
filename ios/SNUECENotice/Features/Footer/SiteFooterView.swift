@@ -14,6 +14,7 @@ struct SiteFooterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SyncStatusBadge(state: syncState)
+                .tutorialTarget(.footerSync)
                 .padding(.bottom, 12)
 
             HStack(alignment: .top, spacing: 16) {
@@ -37,6 +38,7 @@ struct SiteFooterView: View {
                         footerButton("홍보 신청") { router.present(.bannerInquiry) }
                         footerLink("자주 묻는 질문", "faq.html")
                     }
+                    .tutorialTarget(.footerLinks)
                     column("운영") {
                         footerLink("운영 주체 안내", "operator.html")
                         footerLink("개인정보처리방침", "privacy.html")

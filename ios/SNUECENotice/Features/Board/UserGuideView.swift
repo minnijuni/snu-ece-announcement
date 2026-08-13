@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// 사용 설명서. 검색창 오른쪽 돋보기를 누르면 열린다.
+/// 글로 된 사용 설명서. 웹 `guide.html`에 해당한다.
 ///
-/// 웹은 화면 위에 스포트라이트를 얹어 요소를 하나씩 짚는 안내였다. 폰에서는
-/// 화면을 가리며 짚는 대신 같은 내용을 차례대로 읽는 목록으로 옮겼다. 문구는
-/// `js/tutorial.js`의 것을 그대로 쓰되, 데스크톱 전용 단계(끌어서 비교)는 뺐다.
+/// 검색창 돋보기는 이제 화면 위에서 직접 짚는 투어(`TutorialOverlayView`)를
+/// 연다. 이 목록판은 투어 카드의 "글로 된 설명서 보기"와 서랍·푸터의
+/// "서비스 안내"에서 열린다. 문구는 `js/tutorial.js`의 것과 같다.
 struct UserGuideView: View {
     @Environment(\.dismiss) private var dismiss
 
