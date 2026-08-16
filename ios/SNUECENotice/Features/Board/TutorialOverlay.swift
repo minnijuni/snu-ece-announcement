@@ -175,8 +175,13 @@ struct TutorialOverlayView: View {
 
                 card(in: proxy, hole: hole)
             }
-            .ignoresSafeArea()
         }
+        /* 안전 영역 무시는 GeometryReader 바깥에 건다. 안쪽 ZStack에 걸면
+           판만 화면 끝까지 늘어나고 앵커 좌표는 안전 영역 안을 기준으로 남아,
+           구멍이 상태 표시줄 높이만큼 위로 어긋난다 — 노치 높이가 기기마다
+           달라 어긋남도 기기마다 달랐다. 재는 곳과 그리는 곳이 한 좌표계를
+           써야 구멍이 표적 위에 앉는다. */
+        .ignoresSafeArea()
         .transition(.opacity)
     }
 
@@ -209,7 +214,9 @@ struct TutorialOverlayView: View {
                      : (alignment == .bottom ? 0 : Self.edge))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
             .padding(.top, alignment == .bottom && hole != nil ? min(topInset, proxy.size.height * 0.55) : 0)
-            .padding(.bottom, alignment == .top && hole != nil ? min(bottomInset, proxy.size.height * 0.55) : Self.edge)
+            .padding(.bottom, alignment == .top && hole != nil
+                     ? min(bottomInset, proxy.size.height * 0.55)
+                     : proxy.safeAreaInsets.bottom + Self.edge)
             .animation(Self.move, value: index)
     }
 

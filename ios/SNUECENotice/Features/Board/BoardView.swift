@@ -127,6 +127,19 @@ struct BoardView: View {
             }
             .animation(.easeOut(duration: 0.18), value: board.isLoading)
             // 사용 설명서 투어. 위 겹칠 것들까지 모두 덮도록 맨 마지막에 얹는다.
+            #if DEBUG
+            // 웹의 `?tutorial=1`에 해당하는 개발용 입구. 시뮬레이터에서는 탭을
+            // 넣을 수 없어 투어 화면을 확인할 길이 없으므로 실행 인자로 연다:
+            //   xcrun simctl launch <udid> kr.ac.notice.ece.snu -tutorialStep 3
+            // (`-키 값` 꼴 인자는 UserDefaults 인자 도메인으로 들어온다.)
+            .onAppear {
+                guard let raw = UserDefaults.standard.string(forKey: "tutorialStep"),
+                      let step = Int(raw) else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    tutorialGo(step, scroller)
+                }
+            }
+            #endif
             .overlayPreferenceValue(TutorialAnchorKey.self) { anchors in
                 if let step = tutorialIndex {
                     TutorialOverlayView(
@@ -341,7 +354,11 @@ struct BoardView: View {
     /// 없는 것처럼 왼쪽 끝에 붙는다.
     @ViewBuilder
     private var floatingMenuHandle: some View {
-        if menuHandleVisible || tutorialHoldsMenuHandle {
+        /* 투어 중에는 손잡이 단계에서만 보인다. 투어가 검색창을 맨 위로
+           굴리는 것도 스크롤이라 손잡이가 딸려 나오는데, 그 자리가 마침
+           스포트라이트 구멍 속 검색창 왼쪽 끝이어서 설명과 무관한 버튼이
+           또렷이 겹쳐 보였다. */
+        if tutorialIndex == nil ? menuHandleVisible : tutorialHoldsMenuHandle {
             Button {
                 router.openDrawer()
             } label: {
