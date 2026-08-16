@@ -9,7 +9,10 @@ struct NotificationPreferences: Codable, Equatable {
     var categoryIds: Set<Int> = []
     var includeUrgent = true
     /// 마감 며칠 전에 알릴지. nil이면 별도 마감 알림을 보내지 않는다.
-    var reminderDaysBefore: Int?
+    /// 새로 설치하면 3일 전으로 출발한다 — 알림을 켠 채로 주면서 예약할
+    /// 것이 하나도 없으면 켠 보람이 없다. 저장된 설정은 있는 값만 읽으므로
+    /// 사용자가 '없음'(nil)을 골라 둔 것은 그대로 지켜진다.
+    var reminderDaysBefore: Int? = 3
 
     static let yearOptions = ["26학번", "25학번", "24학번", "23학번", "22학번"]
     static let reminderOptions = [1, 3, 7]
@@ -59,7 +62,30 @@ final class NotificationPreferencesStore: ObservableObject {
         } else {
             preferences = NotificationPreferences()
         }
-        isSubscribed = defaults.bool(forKey: Self.subscribedKey)
+        // 알림은 켜진 채로 출발한다. 꺼짐이 기본이면 처음 설치한 사람은
+        // 마감 알림이 있는 줄도 모른 채 지나간다. 끈 기록이 있을 때만 꺼 둔다.
+        isSubscribed = defaults.object(forKey: Self.subscribedKey) == nil
+            ? true
+            : defaults.bool(forKey: Self.subscribedKey)
+    }
+
+    /// 첫 실행에서 알림 권한을 묻는다. 켜진 채 출발하는데 권한을 묻지 않으면
+    /// 예약이 전부 조용히 무시된다. 거절당했거나 설정 앱에서 꺼 두었으면
+    /// 종도 꺼서 화면과 실제가 어긋나지 않게 한다.
+    func requestAuthorizationIfNeeded() async {
+        guard isSubscribed else { return }
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            isSubscribed = granted
+            defaults.set(granted, forKey: Self.subscribedKey)
+        case .denied:
+            isSubscribed = false
+            defaults.set(false, forKey: Self.subscribedKey)
+        default:
+            break
+        }
     }
 
     private func persist() {

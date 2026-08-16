@@ -8,6 +8,7 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var board: BoardViewModel
     @EnvironmentObject private var analytics: BetaAnalytics
+    @EnvironmentObject private var notifications: NotificationPreferencesStore
     @StateObject private var router = AppRouter()
 
     @State private var drawerDrag: CGFloat = 0
@@ -72,7 +73,16 @@ struct RootView: View {
         .onOpenURL { router.handle(url: $0) }
         .task {
             analytics.appLaunched()
+            // 목록을 먼저 띄운다. 권한 물음은 사용자가 답할 때까지 멈춰
+            // 있으므로 앞에 두면 첫 화면까지 그만큼 늦어진다.
             await board.loadInitialIfNeeded()
+            await notifications.requestAuthorizationIfNeeded()
+            await notifications.rescheduleReminders(for: board.notices)
+        }
+        // 목록이 갱신될 때마다 마감 알림을 다시 세운다. 설정 화면에서 저장할
+        // 때만 예약하면 그 뒤 새로 받은 공지의 마감은 영영 잡히지 않는다.
+        .onChange(of: board.notices) { _, notices in
+            Task { await notifications.rescheduleReminders(for: notices) }
         }
     }
 

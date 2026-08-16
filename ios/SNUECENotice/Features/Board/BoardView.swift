@@ -198,7 +198,9 @@ struct BoardView: View {
         case .categoryTabs:
             scroller.scrollTo(Self.categoryAnchor, anchor: .center)
         case .sortChips:
-            scroller.scrollTo(Self.sortAnchor, anchor: .center)
+            // 가운데 두면 설명 카드가 위로 밀려 천장에 붙는다. 정렬 줄을
+            // 화면 위쪽 1/4에 세워 카드가 아래쪽에 넉넉히 앉게 한다.
+            scroller.scrollTo(Self.sortAnchor, anchor: UnitPoint(x: 0.5, y: 0.25))
         case .noticeCard:
             scroller.scrollTo(Self.gridAnchor, anchor: .top)
         case .banner:

@@ -16,6 +16,13 @@ struct NoticeGrid: View {
     /// 왼쪽 열을 끌어올리는 높이. 웹 `margin-top: -46px`와 같다.
     private static let staggerOffset: CGFloat = -46
 
+    /// 투어가 짚는 카드. 첫 카드는 목록을 맨 위로 굴렸을 때 위에 뜨는
+    /// 검색줄에 머리가 눌려 잘려 보이므로, 한 행 아래(왼쪽 열 둘째 카드)를
+    /// 짚는다. 카드가 그만큼 없으면 첫 카드로 물러난다.
+    private var tutorialCardID: Notice.ID? {
+        (notices.count > 2 ? notices[2] : notices.first)?.id
+    }
+
     private var columns: (left: [Notice], right: [Notice]) {
         var left: [Notice] = []
         var right: [Notice] = []
@@ -46,8 +53,7 @@ struct NoticeGrid: View {
                     thumbnailURL: thumbnailURL(notice),
                     onTap: { onSelect(notice) }
                 )
-                // 사용 설명서 투어는 맨 첫 카드 하나만 짚는다.
-                .tutorialTarget(notice.id == notices.first?.id ? .noticeCard : nil)
+                .tutorialTarget(notice.id == tutorialCardID ? .noticeCard : nil)
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)
