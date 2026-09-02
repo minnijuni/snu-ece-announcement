@@ -67,3 +67,16 @@ test('Kakao category rules follow the four topic-only categories', () => {
         ['신청 기간 3월 1일까지, D-3', '까지, D-3', 'D-3']
     );
 });
+
+test('Kakao drafts the rules cannot place still get a proposed category', () => {
+    // 규칙에 안 걸린 메시지가 '미분류'로 남으면 관리자가 하나하나 골라야
+    // 가져올 수 있었다. 공용 분류기가 제안하고 드롭다운에서 바꾸게 한다.
+    const sample = [
+        '--------------- 2025년 3월 9일 일요일 ---------------',
+        '[총학생회] [오전 9:46] [샤人AI: 선배에게 듣는 AI 현장 이야기]\n동문 선배들과 네트워킹하는 세션입니다.'
+    ].join('\r\n');
+    const result = buildKakaoBackfillDrafts(sample);
+    assert.equal(result.drafts[0].categorySlug, 'community');
+    assert.equal(result.drafts[0].classificationStatus, 'fallback');
+    assert.equal(result.stats.unclassifiedCount, 0);
+});

@@ -12,6 +12,8 @@
     "prepare:public": "node scripts/prepare-public.mjs",
     "migrate:categories:dry-run": "node scripts/migrate-notice-categories.mjs",
     "migrate:categories": "node scripts/migrate-notice-categories.mjs --apply",
+    "backfill:categories:dry-run": "node scripts/backfill-notice-categories.mjs",
+    "backfill:categories": "node scripts/backfill-notice-categories.mjs --apply",
     "reclassify:local": "node scripts/reclassify-local-notices.mjs"
   },
   "dependencies": {

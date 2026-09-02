@@ -22,6 +22,7 @@ import {
 } from './services/notice-expiry.js';
 import { getAutomationConfig } from './config/runtime-config.js';
 import { CANONICAL_NOTICE_CATEGORIES } from './config/notice-categories.js';
+import { ensureNoticeCategory, normalizeCategoryKey } from './services/notice-classifier.js';
 import { createAutomationStore } from './storage/automation-store.js';
 import { createEceCrawler } from './services/ece-crawler.js';
 import * as eceParser from './services/ece-parser.js';
@@ -834,10 +835,9 @@ function normalizeNoticeInput(body = {}) {
     const rewardNote = String(body.rewardNote || body.surveyReward || '').trim().slice(0, 120) || null;
     const hasReward = body.hasReward === true || body.hasReward === 'true' || Boolean(rewardNote);
     const requiresAction = body.requiresAction === true || body.requiresAction === 'true';
-    const allowedCategories = new Set(CANONICAL_NOTICE_CATEGORIES.map(item => item.key));
-    const category = allowedCategories.has(String(body.category || '').trim())
-        ? String(body.category).trim()
-        : null;
+    // 예전 키('BENEFIT')나 slug로 와도 현재 넷 중 하나로 맞춘다. 비어 있으면
+    // 저장 직전에 규칙 분류기가 채운다 — 카테고리 없는 공지는 만들지 않는다.
+    const category = normalizeCategoryKey(body.category);
     const aiSummary = Array.isArray(body.aiSummary)
         ? body.aiSummary.map(item => String(item || '').trim()).filter(Boolean).slice(0, 3)
         : [];
@@ -1544,12 +1544,14 @@ async function addNoticeLifecycle(rows) {
         Number(category.id),
         category.slug
     ]));
-    const categoryKeyById = new Map(categories.map(category => [
-        Number(category.id),
-        category.key || CANONICAL_NOTICE_CATEGORIES.find(item => item.slug === category.slug)?.key || null
-    ]));
     return rows.map(row => {
         const notice = toClientNotice(row);
+        /* 저장값이 비었거나 예전 키('BENEFIT')인 공지도 읽을 때 넷 중 하나로
+           채워 내보낸다. 백필 스크립트를 돌리기 전에도 모든 공지가 어느 탭엔가
+           잡히고, 앱도 category를 항상 받는다. 이미 맞는 값은 그대로 둔다. */
+        const resolvedCategory = ensureNoticeCategory(notice, categories);
+        notice.category = resolvedCategory.category;
+        notice.categoryIds = resolvedCategory.categoryIds;
         let lifecycle = {
             deadlineAt: notice.deadlineAt || notice.deadline || null,
             expiresAt: notice.expiresAt,
@@ -1577,9 +1579,8 @@ async function addNoticeLifecycle(rows) {
         const state = getNoticeLifecycleState(lifecycle);
         return {
             ...row,
-            category: notice.category
-                || notice.categoryIds.map(id => categoryKeyById.get(Number(id))).find(Boolean)
-                || null,
+            category: notice.category,
+            categoryIds: notice.categoryIds,
             deadlineAt: lifecycle.deadlineAt,
             expiresAt: lifecycle.expiresAt,
             isAlwaysOpen: lifecycle.isAlwaysOpen,
@@ -1719,12 +1720,20 @@ async function prepareNoticeStoragePayload(payload, { createdAt = new Date().toI
         Number(category.id),
         category.slug
     ]));
-    const categorySlugs = payload.categoryIds
+    /* 저장되는 공지는 반드시 넷 중 하나를 단다. 관리자가 고른 키가 있으면
+       그것, 없으면 고른 카테고리 id의 키, 그것도 없으면 제목·본문으로 정한다.
+       categoryIds도 같은 곳을 가리키게 맞춘다 — 목록의 탭은 이것으로 거른다. */
+    const resolved = ensureNoticeCategory({
+        category: payload.category,
+        categoryIds: Array.isArray(payload.categoryIds) ? payload.categoryIds : [],
+        title: payload.title,
+        content: payload.content,
+        keywords: payload.keywords,
+        host: payload.host
+    }, categories);
+    const categorySlugs = resolved.categoryIds
         .map(id => categorySlugById.get(Number(id)))
         .filter(Boolean);
-    const selectedCategory = categories.find(category =>
-        Number(category.id) === Number(payload.categoryIds[0])
-    );
     const lifecycle = calculateNoticeLifecycle({
         deadlineAt: payload.deadlineAt,
         isAlwaysOpen: payload.isAlwaysOpen,
@@ -1733,7 +1742,8 @@ async function prepareNoticeStoragePayload(payload, { createdAt = new Date().toI
     });
     return {
         ...payload,
-        category: payload.category || selectedCategory?.key || null,
+        category: resolved.category,
+        categoryIds: resolved.categoryIds,
         deadline: lifecycle.deadlineAt ? lifecycle.deadlineAt.slice(0, 10) : '',
         deadlineAt: lifecycle.deadlineAt,
         expiresAt: lifecycle.expiresAt,
@@ -1801,6 +1811,7 @@ async function updateNotice(id, payload) {
             is_always_open: preparedPayload.isAlwaysOpen,
             is_pinned: preparedPayload.isPinned,
             is_hidden: preparedPayload.isHidden,
+            category: preparedPayload.category,
             survey_reward: preparedPayload.surveyReward,
             ai_summary: preparedPayload.aiSummary,
             images: preparedPayload.images,
@@ -2300,9 +2311,15 @@ app.use(createAutomationRouter({
     analyzer: noticeAnalyzer,
     pushService,
     prepareNoticePublication: async (notice, edits) => {
+        /* 관리자 화면은 category 키가 아니라 categoryIds만 보낸다. 검수에서
+           탭을 바꿨는데 분석 때의 키가 남아 있으면 그쪽이 이기므로, ids가 오면
+           옛 키는 비우고 ids로 다시 정한다. */
         const merged = {
             ...notice,
             ...edits,
+            category: Object.hasOwn(edits, 'category')
+                ? edits.category
+                : (Array.isArray(edits.categoryIds) ? null : notice.category),
             categoryIds: Array.isArray(edits.categoryIds)
                 ? edits.categoryIds
                 : (notice.categoryIds || []),
@@ -2322,6 +2339,7 @@ app.use(createAutomationRouter({
             deadlineAt: prepared.deadlineAt,
             expiresAt: prepared.expiresAt,
             isAlwaysOpen: prepared.isAlwaysOpen,
+            category: prepared.category,
             categoryIds: prepared.categoryIds
         };
     },
@@ -3192,7 +3210,18 @@ app.get('/api/notices/:id', async (req, res) => {
         }
         const notice = await getPublishedNoticeById(id);
         if (!notice) return res.status(404).json({ error: '공지 없음' });
-        res.json({ notice });
+        // 목록과 같은 규칙으로 채운다. 상세만 비어 오면 카드에는 있던 분류가 상세에서 사라진다.
+        const resolvedCategory = ensureNoticeCategory(
+            notice,
+            await automationStore.listCategories({ activeOnly: false })
+        );
+        res.json({
+            notice: {
+                ...notice,
+                category: resolvedCategory.category,
+                categoryIds: resolvedCategory.categoryIds
+            }
+        });
     } catch (error) {
         res.status(500).json({ error: error.message || '공지 조회 실패' });
     }
