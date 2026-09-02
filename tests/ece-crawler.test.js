@@ -211,3 +211,63 @@ test('a failed analysis says why in the log instead of vanishing', async () => {
     // 어느 공지에서 났는지도 알 수 있어야 손을 댈 수 있다.
     assert.match(reported, /only/);
 });
+
+test('crawler assigns a category even when analysis is unavailable', async () => {
+    // 분석이 실패한 공지가 category null로 검수함에 쌓이고, 승인한 뒤에도
+    // 어느 탭에도 안 잡혔다. 규칙 분류기가 넷 중 하나를 달아 준다.
+    const { CANONICAL_NOTICE_CATEGORIES } = await import('../server/config/notice-categories.js');
+    const directory = await mkdtemp(path.join(tmpdir(), 'ece-crawler-category-'));
+    const store = createAutomationStore({
+        useSupabase: false,
+        filePath: path.join(directory, 'automation.json'),
+        canonicalCategories: CANONICAL_NOTICE_CATEGORIES
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+        const crawler = createEceCrawler({
+            store,
+            fetchImpl: async url => response(String(url).includes('md=v') ? 'detail' : 'list'),
+            parser: {
+                parseAcademicsList: () => [{
+                    externalId: '77',
+                    audience: '학부',
+                    title: '2026학년도 2학기 수강신청 안내',
+                    sourceUrl: 'https://ece.snu.ac.kr/community/academics?md=v&bbsidx=77',
+                    publishedDate: '2026-07-01'
+                }],
+                parseAcademicsDetail: (_html, sourceUrl) => ({
+                    externalId: '77',
+                    title: '2026학년도 2학기 수강신청 안내',
+                    content: '수강신청 기간을 안내합니다.',
+                    publishedDate: '2026-07-01',
+                    attachments: [],
+                    sourceUrl
+                })
+            },
+            analyzer: {
+                analyzeNotice: async () => {
+                    throw new Error('quota exhausted');
+                }
+            },
+            config: {
+                baseUrl: 'https://ece.snu.ac.kr/community/academics',
+                pages: 1,
+                maxDetails: 5,
+                requestDelayMs: 0,
+                timeoutMs: 1000
+            },
+            wait: async () => {}
+        });
+
+        await crawler.run();
+    } finally {
+        console.warn = warn;
+    }
+
+    const [notice] = await store.listReviewNotices();
+    const academic = (await store.listCategories()).find(category => category.key === 'ACADEMIC');
+    assert.equal(notice.analysisStatus, 'failed');
+    assert.equal(notice.category, 'ACADEMIC');
+    assert.deepEqual(notice.categoryIds, [academic.id]);
+});

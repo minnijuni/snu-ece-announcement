@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { categorySlugForKey, classifyNoticeCategory } from './notice-classifier.js';
 
 const DAY_MS = 86_400_000;
 const DATE_DIVIDER = /^-+\s*(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일(?:\s+\S+요일)?\s*-+$/;
@@ -223,7 +224,12 @@ export function buildKakaoBackfillDrafts(rawInput) {
             continue;
         }
 
-        const categorySlug = classifyDraft(message.title, message.body);
+        /* 규칙에 안 걸린 메시지도 빈손으로 두지 않는다. 공용 분류기가 넷 중
+           하나를 제안하고, 관리자는 가져오기 전에 드롭다운에서 바꿀 수 있다. */
+        const ruleSlug = classifyDraft(message.title, message.body);
+        const categorySlug = ruleSlug || categorySlugForKey(
+            classifyNoticeCategory({ title: message.title, content: message.body }).key
+        );
         const requiresAction = /신청|접수|지원|모집|등록|제출|설문|폼|참가/.test(
             `${message.title}\n${message.body}`
         );
@@ -244,7 +250,7 @@ export function buildKakaoBackfillDrafts(rawInput) {
             sender: message.sender,
             categorySlug,
             requiresAction,
-            classificationStatus: categorySlug ? 'draft' : 'unclassified',
+            classificationStatus: ruleSlug ? 'draft' : 'fallback',
             urls: message.urls,
             deadlineExpressions: message.deadlineExpressions,
             imageAttachmentCount: message.imageAttachmentCount,

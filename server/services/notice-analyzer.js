@@ -1,4 +1,5 @@
 import { getGeminiRetryAfterSeconds } from './gemini-rate-limit.js';
+import { categoryIdForKey, classifyNoticeCategory, normalizeCategoryKey } from './notice-classifier.js';
 
 export class NoticeAnalysisError extends Error {
     constructor(message, options) {
@@ -118,6 +119,7 @@ function buildVerificationPrompt({ title, content, categories, draft, correction
   "7월 20일 ~ 9월 15일"처럼 기간이 적혀 있으면 앞이 startDate, 뒤가 deadline입니다.
   하루짜리 행사는 startDate만 채우고 deadline은 비웁니다. 근거가 없으면 null입니다.
 - 카테고리는 반드시 학사, 기회, 설문, 행사 중 가장 핵심적인 하나만 선택합니다.
+- existingCategoryIds는 비워 두지 않습니다. 1차가 비웠으면 원문을 근거로 하나를 고르고, 어느 쪽도 뚜렷하지 않으면 행사를 고릅니다.
 - requiresAction은 신청·제출·응답이 필요할 때만 true입니다.
 - hasReward는 기프티콘·상품·간식·지원금·할인 등 즉시 확인 가능한 보상이 있을 때만 true입니다.
 
@@ -208,6 +210,8 @@ function buildPrompt({ title, content, categories, correction }) {
   사례비나 기프티콘이 걸려 있어도 참여가 목적이면 여기입니다.
 - 행사: 학생 자치, 학내 행사, 시설·출입·교통, 제휴·할인 등 캠퍼스 생활 정보입니다.
 - 네 카테고리 중 가장 핵심적인 하나만 선택합니다.
+- existingCategoryIds에는 활성 카테고리 ID를 정확히 하나 넣습니다. 빈 배열은 허용되지 않습니다.
+- 어느 쪽도 뚜렷하지 않으면 캠퍼스 생활 전반을 뜻하는 행사를 고릅니다. 학사 불이익이 걸려 있으면 학사, 선발이 있으면 기회, 응답만 하면 끝나면 설문입니다.
 - 기회와 설문은 선발이 있느냐로 가릅니다. 붙고 떨어지는 일이 있으면 기회입니다.
 - requiresAction은 신청·제출·응답이 필요할 때 true입니다.
 - hasReward는 상품·기프티콘·사례비·지원금·할인 등이 확인될 때 true이며 rewardNote에 짧게 적습니다.
@@ -365,12 +369,30 @@ export function createNoticeAnalyzer({
                 );
             }
 
-            const withCategory = analysis => ({
-                ...analysis,
-                category: categories.find(item =>
+            /* 모델이 고른 카테고리가 있으면 그대로 쓴다. 비워 보냈으면 다시
+               부르지 않는다 — 한 번 더 부르면 무료 등급 한도만 태우고 같은 답이
+               오기 쉽다. 대신 규칙 분류기로 메워 어느 탭에든 반드시 잡히게 한다. */
+            const withCategory = analysis => {
+                const chosen = categories.find(item =>
                     Number(item.id) === Number(analysis.existingCategoryIds[0])
-                )?.key || null
-            });
+                );
+                const modelKey = chosen ? normalizeCategoryKey(chosen.key || chosen.slug) : null;
+                if (modelKey) {
+                    return { ...analysis, category: modelKey, categorySource: 'model' };
+                }
+                const fallback = classifyNoticeCategory({
+                    title,
+                    content,
+                    keywords: analysis.keywords
+                });
+                const categoryId = categoryIdForKey(categories, fallback.key);
+                return {
+                    ...analysis,
+                    category: fallback.key,
+                    existingCategoryIds: categoryId === null ? [] : [categoryId],
+                    categorySource: 'rules'
+                };
+            };
 
             if (!verifyAnalysis) return withCategory(draft);
 

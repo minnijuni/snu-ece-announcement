@@ -412,3 +412,90 @@ test('the second pass can be turned off to halve the daily quota cost', async ()
     // 카테고리는 1차 결과에서도 그대로 이어져야 한다.
     assert.equal(result.category, 'ACADEMIC');
 });
+
+test('an empty model category is filled by the rule classifier without another call', async () => {
+    // 모델이 existingCategoryIds를 비워 보낸 공지가 category null로 남아
+    // 어느 탭에도 안 잡혔다. 다시 부르면 한도만 태우니 규칙으로 메운다.
+    let calls = 0;
+    const analyzer = createNoticeAnalyzer({
+        apiKey: 'test-key',
+        wait: async () => {},
+        verifyAnalysis: false,
+        fetchImpl: async () => {
+            calls += 1;
+            return {
+                ok: true,
+                json: async () => ({
+                    candidates: [{
+                        content: {
+                            parts: [{
+                                text: JSON.stringify({
+                                    summary: ['설문 참여 안내'],
+                                    deadline: null,
+                                    targets: ['전체'],
+                                    keywords: ['설문'],
+                                    existingCategoryIds: [],
+                                    confidence: 0.7
+                                })
+                            }]
+                        }
+                    }]
+                })
+            };
+        },
+        categoryProvider: async () => [
+            { id: 1, key: 'ACADEMIC', name: '학사' },
+            { id: 3, key: 'SURVEY', name: '설문' }
+        ]
+    });
+
+    const analysis = await analyzer.analyzeNotice({
+        title: '[학생회] 교육환경 실태조사 설문',
+        content: '많은 참여 부탁드립니다.'
+    });
+
+    assert.equal(calls, 1);
+    assert.equal(analysis.category, 'SURVEY');
+    assert.deepEqual(analysis.existingCategoryIds, [3]);
+    assert.equal(analysis.categorySource, 'rules');
+});
+
+test('a category the model chose is kept even when the rules would differ', async () => {
+    const analyzer = createNoticeAnalyzer({
+        apiKey: 'test-key',
+        wait: async () => {},
+        verifyAnalysis: false,
+        fetchImpl: async () => ({
+            ok: true,
+            json: async () => ({
+                candidates: [{
+                    content: {
+                        parts: [{
+                            text: JSON.stringify({
+                                summary: ['졸업생 인턴 모집'],
+                                deadline: null,
+                                targets: ['전체'],
+                                keywords: [],
+                                existingCategoryIds: [2],
+                                confidence: 0.9
+                            })
+                        }]
+                    }
+                }]
+            })
+        }),
+        categoryProvider: async () => [
+            { id: 1, key: 'ACADEMIC', name: '학사' },
+            { id: 2, key: 'OPPORTUNITY', name: '기회' }
+        ]
+    });
+
+    const analysis = await analyzer.analyzeNotice({
+        title: '졸업 요건 및 졸업 신청 안내',
+        content: '졸업 사정 일정입니다.'
+    });
+
+    assert.equal(analysis.category, 'OPPORTUNITY');
+    assert.deepEqual(analysis.existingCategoryIds, [2]);
+    assert.equal(analysis.categorySource, 'model');
+});

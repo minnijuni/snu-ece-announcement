@@ -1,3 +1,5 @@
+import { categoryIdForKey, classifyNoticeCategory } from './notice-classifier.js';
+
 const SOURCE_TYPE = 'ece_academics';
 
 function listPageUrl(baseUrl, page) {
@@ -38,9 +40,39 @@ export function createEceCrawler({
         throw new Error('store, parser, and config are required');
     }
 
+    /* 카테고리 id는 저장소마다 다르다. 크롤 한 번에 한 번만 읽고, 읽기가
+       실패해도 크롤을 멈추지 않는다 — 키는 남고 id만 비는 편이 낫다. */
+    async function loadCategories() {
+        if (typeof store.listCategories !== 'function') return [];
+        try {
+            return await store.listCategories();
+        } catch {
+            return [];
+        }
+    }
+
+    /* 분석이 실패했거나 모델이 카테고리를 비워 보낸 공지도 넷 중 하나를
+       달고 검수함에 들어간다. 비워 두면 승인 뒤에도 어느 탭에도 안 잡힌다. */
+    function withFallbackCategory(analysis, detail, categories) {
+        if (analysis.category) return analysis;
+        const fallback = classifyNoticeCategory({
+            title: detail.title,
+            content: detail.content,
+            keywords: analysis.keywords
+        });
+        const categoryId = categoryIdForKey(categories, fallback.key);
+        return {
+            ...analysis,
+            category: fallback.key,
+            existingCategoryIds: categoryId === null ? [] : [categoryId],
+            categorySource: fallback.source
+        };
+    }
+
     async function run({ backfill = false } = {}) {
         const crawlRun = await store.beginCrawlRun(SOURCE_TYPE);
         let requestCount = 0;
+        let categories = null;
 
         async function requestText(url) {
             if (requestCount > 0 && config.requestDelayMs > 0) {
@@ -113,6 +145,10 @@ export function createEceCrawler({
                             );
                             analysis = fallbackAnalysis();
                         }
+                    }
+                    if (!analysis.category) {
+                        categories ??= await loadCategories();
+                        analysis = withFallbackCategory(analysis, detail, categories);
                     }
 
                     await store.createPendingNotice({
