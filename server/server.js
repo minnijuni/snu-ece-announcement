@@ -12,7 +12,6 @@ import {
     legacyHashToken,
     verifyCredential
 } from './services/credential-hash.js';
-import { getGeminiRetryAfterSeconds } from './services/gemini-rate-limit.js';
 import { buildKakaoBackfillDrafts } from './services/kakao-backfill.js';
 import { createOcrService } from './services/ocr-service.js';
 import {
@@ -85,10 +84,17 @@ const noticeThumbnailService = createNoticeThumbnailService({
         return Buffer.from(await response.arrayBuffer());
     }
 });
+// 주 모델이 부하로 응답을 거부하는 순간에도 자동 수집·검수가 멈추지 않도록 폴백 사슬을 준비한다.
+// 콤마로 여러 개를 넣을 수 있고, 지정이 없으면 lite 계열을 기본으로 시도한다.
+const geminiFallbackModels = (process.env.GEMINI_FALLBACK_MODELS || 'gemini-2.5-flash-lite,gemini-2.0-flash')
+    .split(',')
+    .map(name => name.trim())
+    .filter(Boolean);
 const noticeAnalyzer = process.env.GEMINI_API_KEY
     ? createNoticeAnalyzer({
         apiKey: process.env.GEMINI_API_KEY,
         model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
+        fallbackModels: geminiFallbackModels,
         // 무료 등급의 분당 한도에 맞춘 간격. 한 번의 크롤이 한도를 다 쓰면
         // 그 창 동안 관리자의 수동 편집까지 429로 막힌다.
         // 유료 등급으로 올리면 줄여서 크롤 시간을 되돌릴 수 있다.
@@ -3290,11 +3296,10 @@ app.post('/api/notices/:id/view', async (req, res) => {
 });
 
 app.post('/api/summary', requireNoticeAdmin, async (req, res) => {
-    const { prompt, model = 'gemini-flash-latest' } = req.body || {};
-    const apiKey = process.env.GEMINI_API_KEY;
+    const { prompt } = req.body || {};
 
-    if (!apiKey) {
-        return res.status(500).json({ error: 'GEMINI_API_KEY가 설정되지 않았습니다.' });
+    if (!noticeAnalyzer) {
+        return res.status(503).json({ error: 'GEMINI_API_KEY가 설정되지 않았습니다.' });
     }
 
     if (!prompt || typeof prompt !== 'string') {
@@ -3302,40 +3307,22 @@ app.post('/api/summary', requireNoticeAdmin, async (req, res) => {
     }
 
     try {
-        const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }]
-                })
-            }
-        );
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            if (response.status === 429) {
-                const retryAfterSeconds = getGeminiRetryAfterSeconds(
-                    response.headers.get('retry-after'),
-                    data
-                );
-                res.set('Retry-After', String(retryAfterSeconds));
-                return res.status(429).json({
-                    error: '분당 호출 초과',
-                    code: 'GEMINI_RATE_LIMIT',
-                    retryAfterSeconds
-                });
-            }
-            return res.status(response.status).json({
-                error: data?.error?.message || 'Gemini API 호출 실패'
-            });
-        }
-
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        // analyzer가 이미 재시도·폴백 모델·페이싱을 담당한다.
+        // 여기서 다시 fetch를 만들면 부하가 몰릴 때 폴백을 못 받아 그대로 실패한다.
+        const text = await noticeAnalyzer.callGemini(prompt);
         res.json({ text });
     } catch (error) {
+        if (typeof error?.code === 'string' && error.code.startsWith('GEMINI_')) {
+            const status = Number(error.status) >= 400 && Number(error.status) < 600
+                ? Number(error.status)
+                : 503;
+            const payload = { error: error.message || 'Gemini 호출 실패', code: error.code };
+            if (Number(error.retryAfterSeconds) > 0) {
+                payload.retryAfterSeconds = Number(error.retryAfterSeconds);
+                res.set('Retry-After', String(Math.ceil(Number(error.retryAfterSeconds))));
+            }
+            return res.status(status).json(payload);
+        }
         console.error(error);
         res.status(500).json({ error: error.message || '서버 오류' });
     }

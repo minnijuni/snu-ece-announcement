@@ -962,12 +962,19 @@ test('Gemini quota errors show only a retry countdown and admin mode has one exi
     const html = await readFile('admin.html', 'utf8');
     const admin = await readFile('js/admin.js', 'utf8');
     const server = await readFile('server/server.js', 'utf8');
+    const analyzer = await readFile('server/services/notice-analyzer.js', 'utf8');
+    const routes = await readFile('server/routes/automation-routes.js', 'utf8');
 
-    assert.match(server, /code:\s*'GEMINI_RATE_LIMIT'/);
+    // 429는 analyzer가 코드를 붙이고 route가 상태와 함께 전달해야 UI가 카운트다운을 띄운다.
+    assert.match(analyzer, /code\s*=\s*'GEMINI_RATE_LIMIT'/);
+    assert.match(routes, /GEMINI_/);
     assert.match(server, /retryAfterSeconds/);
     assert.match(admin, /function showGeminiRetryCountdown/);
-    assert.match(admin, /분당 호출 초과로 \$\{remaining\}초 뒤에 다시 실행 부탁드립니다\./);
+    assert.match(admin, /\$\{remaining\}초 뒤에 다시 실행 부탁드립니다/);
     assert.match(admin, /isGeminiRateLimitError\(error\)/);
+    // 부하 응답은 스키마 오류가 아니라 잠깐 재시도로 처리해야 한다.
+    assert.match(admin, /isGeminiUpstreamUnavailableError\(error\)/);
+    assert.match(analyzer, /GEMINI_UPSTREAM_UNAVAILABLE/);
     assert.match(html, /id="admin-mode-exit"[^>]*onclick="exitAdminMode\(\)"/);
     assert.match(html, />관리자 모드 나가기<\/button>/);
     assert.doesNotMatch(html, /id="admin-logout"|>로그아웃<|공개 화면으로/);

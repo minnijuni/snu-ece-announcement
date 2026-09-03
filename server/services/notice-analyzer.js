@@ -140,6 +140,22 @@ function isRateLimited(error) {
     return Number(error?.status) === 429;
 }
 
+// Gemini가 부하로 요청을 잠깐 거부하는 순간이 있다. 상태코드가 5xx이거나
+// "high demand"·"overloaded"·"unavailable"이 본문에 들어오면 스키마 오류가
+// 아니라 재시도하면 성공할 가능성이 있는 일시 실패다.
+const TRANSIENT_UPSTREAM_PATTERN = /(high demand|overloaded|unavailable|try again later|internal error|deadline exceeded)/i;
+
+function isTransientUpstreamError(error) {
+    const status = Number(error?.status);
+    if (status >= 500 && status <= 599) return true;
+    const message = String(error?.message || '');
+    return TRANSIENT_UPSTREAM_PATTERN.test(message);
+}
+
+function isUpstreamError(error) {
+    return Number.isFinite(Number(error?.status));
+}
+
 function describeCause(error) {
     const message = String(error?.message || '').trim();
     return message || 'reason unknown';
@@ -216,6 +232,7 @@ ${String(content || '').slice(0, 30000)}`.trim();
 export function createNoticeAnalyzer({
     apiKey,
     model = 'gemini-flash-latest',
+    fallbackModels = [],
     fetchImpl = fetch,
     categoryProvider = async () => [],
     // 무료 등급은 분당 호출 수가 막혀 있다. 크롤 한 번이 스무 건을 연속으로
@@ -224,12 +241,16 @@ export function createNoticeAnalyzer({
     // 2차 검수는 호출 수를 두 배로 만든다. 무료 등급처럼 하루 한도가 빠듯하면
     // 접을 수 있다. 자동 수집 공지는 어차피 관리자 검수를 거쳐야 공개된다.
     verifyAnalysis = true,
+    // Gemini가 부하로 잠깐 거부할 때 곧바로 재시도하면 똑같이 막힌다.
+    // 지수 백오프로 몇 초 여유를 주면 대부분 통과한다.
+    transientBackoffMs = [2000, 6000, 15000],
     wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
     now = () => Date.now()
 }) {
     if (!apiKey) throw new Error('Gemini API key is required');
 
     let nextCallAt = 0;
+    const modelChain = [model, ...fallbackModels.filter(name => name && name !== model)];
 
     async function pace() {
         const delay = nextCallAt - now();
@@ -237,10 +258,10 @@ export function createNoticeAnalyzer({
         nextCallAt = now() + minIntervalMs;
     }
 
-    async function generate(prompt) {
+    async function callModel(modelName, prompt) {
         await pace();
         const response = await fetchImpl(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -257,17 +278,50 @@ export function createNoticeAnalyzer({
             );
             error.status = response.status;
             if (response.status === 429) {
+                error.code = 'GEMINI_RATE_LIMIT';
                 error.retryAfterSeconds = getGeminiRetryAfterSeconds(
                     response.headers?.get?.('retry-after'),
                     data
                 );
+            } else if (isTransientUpstreamError(error)) {
+                error.code = 'GEMINI_UPSTREAM_UNAVAILABLE';
+            } else {
+                error.code = 'GEMINI_UPSTREAM_ERROR';
             }
             throw error;
         }
         return data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     }
 
+    async function generate(prompt) {
+        let lastTransient;
+        for (const modelName of modelChain) {
+            for (let attempt = 0; attempt <= transientBackoffMs.length; attempt += 1) {
+                try {
+                    return await callModel(modelName, prompt);
+                } catch (error) {
+                    // 한도 초과와 스키마 오류는 여기서 재시도하지 않는다.
+                    // 스키마 오류는 상위 루프의 correction 프롬프트가 담당한다.
+                    if (isRateLimited(error)) throw error;
+                    if (!isTransientUpstreamError(error)) throw error;
+                    lastTransient = error;
+                    // 아직 남은 백오프 자리가 있으면 잠깐 기다린 뒤 재시도한다.
+                    if (attempt < transientBackoffMs.length) {
+                        await wait(transientBackoffMs[attempt]);
+                    }
+                }
+            }
+            // 이 모델의 재시도가 다 소진되면 다음 폴백 모델로 넘어간다.
+        }
+        throw lastTransient;
+    }
+
     return {
+        // 요약 라우트(수동 편집 흐름)도 같은 재시도·폴백·페이싱을 그대로 쓴다.
+        // 원문 프롬프트만 넘기면 되고, 반환값은 모델이 뱉은 텍스트 그대로다.
+        async callGemini(prompt) {
+            return generate(prompt);
+        },
         async analyzeNotice({ title, content }) {
             const categories = (await categoryProvider())
                 .filter(category => category?.isActive !== false)
@@ -296,9 +350,10 @@ export function createNoticeAnalyzer({
                     );
                     break;
                 } catch (error) {
-                    // 한도 초과는 스키마 오류가 아니다. 곧바로 다시 부르면
-                    // 남은 한도만 태우고 똑같이 막힌다.
-                    if (isRateLimited(error)) throw error;
+                    // 한도 초과와 업스트림 오류는 스키마 오류가 아니다.
+                    // 곧바로 다시 부르면 남은 한도만 태우거나 같은 부하에 부딪혀 실패한다.
+                    // 원인 문자열은 wrapper 없이 그대로 노출해야 운영자가 손쓸 수 있다.
+                    if (isRateLimited(error) || isUpstreamError(error)) throw error;
                     lastError = error;
                 }
             }
@@ -337,7 +392,7 @@ export function createNoticeAnalyzer({
                     );
                     return withCategory(verified);
                 } catch (error) {
-                    if (isRateLimited(error)) throw error;
+                    if (isRateLimited(error) || isUpstreamError(error)) throw error;
                     verificationError = error;
                 }
             }

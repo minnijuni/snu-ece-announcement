@@ -31,6 +31,19 @@ function errorResponse(res, error) {
     if (error?.code === 'CRAWL_ALREADY_RUNNING') {
         return res.status(409).json({ error: '같은 공지 수집 작업이 이미 실행 중입니다.' });
     }
+    // Gemini 업스트림 오류는 관리자에게 원인을 그대로 보여줘야 손쓸 수 있다.
+    // 스키마 오류로 위장하지 않고 상태 코드도 그대로 전달한다.
+    if (typeof error?.code === 'string' && error.code.startsWith('GEMINI_')) {
+        const status = Number(error.status) >= 400 && Number(error.status) < 600
+            ? Number(error.status)
+            : 503;
+        const payload = { error: error.message || 'Gemini 호출 실패', code: error.code };
+        if (Number(error.retryAfterSeconds) > 0) {
+            payload.retryAfterSeconds = Number(error.retryAfterSeconds);
+            res.set('Retry-After', String(Math.ceil(Number(error.retryAfterSeconds))));
+        }
+        return res.status(status).json(payload);
+    }
     console.error('[automation-api]', error);
     return res.status(500).json({ error: error?.message || '자동화 요청 처리에 실패했습니다.' });
 }

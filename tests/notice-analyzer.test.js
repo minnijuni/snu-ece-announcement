@@ -244,6 +244,133 @@ test('calls are paced so one crawl cannot drain the minute quota', async () => {
     assert.equal(waited[0], 6000);
 });
 
+test('a transient upstream 503 is retried with backoff before failing the attempt', async () => {
+    // Google이 "This model is currently experiencing high demand"으로 응답을 거부하는
+    // 순간이 있다. 이건 스키마 문제도 한도 문제도 아니라 잠깐의 부하다.
+    // 곧바로 재요청하면 그대로 다시 막힌다. 백오프로 한 번 더 기다린 뒤 성공하면
+    // 관리자 흐름이 실패 없이 이어진다.
+    const good = JSON.stringify({
+        summary: ['핵심'],
+        deadline: null,
+        targets: ['전체'],
+        keywords: [],
+        existingCategoryIds: [2],
+        confidence: 0.9
+    });
+    const responses = [
+        { ok: false, status: 503, message: 'This model is currently experiencing high demand. Please try again later.' },
+        { ok: true, text: good },
+        { ok: true, text: good }
+    ];
+    const backoffs = [];
+    const analyzer = createNoticeAnalyzer({
+        apiKey: 'test-key',
+        wait: async ms => { backoffs.push(ms); },
+        minIntervalMs: 0,
+        transientBackoffMs: [10, 20, 40],
+        fetchImpl: async () => {
+            const next = responses.shift();
+            if (next.ok) {
+                return {
+                    ok: true,
+                    json: async () => ({ candidates: [{ content: { parts: [{ text: next.text }] } }] })
+                };
+            }
+            return {
+                ok: false,
+                status: next.status,
+                headers: { get: () => null },
+                json: async () => ({ error: { message: next.message } })
+            };
+        },
+        categoryProvider: async () => [{ id: 2, key: 'ACADEMIC', name: '학사' }]
+    });
+
+    const result = await analyzer.analyzeNotice({ title: '제목', content: '본문' });
+
+    assert.deepEqual(result.summary, ['핵심']);
+    // 첫 시도가 503으로 실패하면 백오프를 한 번 삽입해야 한다.
+    assert.ok(backoffs.some(ms => ms === 10), `expected 10ms transient backoff, got ${backoffs}`);
+});
+
+test('exhausted transient retries surface the upstream message, not a schema wrapper', async () => {
+    // 이전에는 상위에서 "did not satisfy the required schema: ..."로 감싸버려
+    // 관리자 화면에는 스키마 오류로 보였다. 원인을 오해하고 프롬프트만 뜯어봤다.
+    // 업스트림 오류는 원문과 status를 그대로 노출해야 한다.
+    const analyzer = createNoticeAnalyzer({
+        apiKey: 'test-key',
+        wait: async () => {},
+        transientBackoffMs: [1, 1, 1],
+        fetchImpl: async () => ({
+            ok: false,
+            status: 503,
+            headers: { get: () => null },
+            json: async () => ({
+                error: { message: 'This model is currently experiencing high demand. Please try again later.' }
+            })
+        }),
+        categoryProvider: async () => []
+    });
+
+    await assert.rejects(
+        analyzer.analyzeNotice({ title: '제목', content: '본문' }),
+        error => {
+            assert.equal(error.status, 503);
+            assert.equal(error.code, 'GEMINI_UPSTREAM_UNAVAILABLE');
+            assert.match(error.message, /high demand/);
+            assert.doesNotMatch(error.message, /did not satisfy the required schema/);
+            return true;
+        }
+    );
+});
+
+test('a fallback model takes over when the primary keeps returning transient errors', async () => {
+    // gemini-flash-latest가 부하로 자리를 비운 사이에도 lite/2.0 계열은 여유가 있다.
+    // 폴백 모델을 지정하면 관리자 흐름이 실패 없이 이어진다.
+    const good = JSON.stringify({
+        summary: ['핵심'],
+        deadline: null,
+        targets: ['전체'],
+        keywords: [],
+        existingCategoryIds: [2],
+        confidence: 0.9
+    });
+    const modelsUsed = [];
+    const analyzer = createNoticeAnalyzer({
+        apiKey: 'test-key',
+        wait: async () => {},
+        model: 'gemini-flash-latest',
+        fallbackModels: ['gemini-2.5-flash-lite'],
+        transientBackoffMs: [1, 1],
+        fetchImpl: async url => {
+            const modelMatch = String(url).match(/models\/([^:]+):generateContent/);
+            const usedModel = modelMatch ? modelMatch[1] : 'unknown';
+            modelsUsed.push(usedModel);
+            if (usedModel === 'gemini-flash-latest') {
+                return {
+                    ok: false,
+                    status: 503,
+                    headers: { get: () => null },
+                    json: async () => ({ error: { message: 'high demand' } })
+                };
+            }
+            return {
+                ok: true,
+                json: async () => ({ candidates: [{ content: { parts: [{ text: good }] } }] })
+            };
+        },
+        categoryProvider: async () => [{ id: 2, key: 'ACADEMIC', name: '학사' }]
+    });
+
+    const result = await analyzer.analyzeNotice({ title: '제목', content: '본문' });
+
+    assert.deepEqual(result.summary, ['핵심']);
+    assert.ok(
+        modelsUsed.includes('gemini-2.5-flash-lite'),
+        `expected fallback to be tried, got ${modelsUsed.join(',')}`
+    );
+});
+
 test('the second pass can be turned off to halve the daily quota cost', async () => {
     // 무료 등급은 하루 호출 수가 막혀 있다. 공지 1건에 두 번 부르면
     // 하루에 검수함에 넣을 수 있는 공지가 절반으로 준다.

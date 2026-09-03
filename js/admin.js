@@ -101,6 +101,13 @@ function isGeminiRateLimitError(error) {
     return error?.code === 'GEMINI_RATE_LIMIT' || Number(error?.status) === 429;
 }
 
+// 서버가 폴백 모델까지 다 시도한 뒤에도 부하로 못 뚫었을 때 오는 신호다.
+// 사용자에게는 "지금 부하가 몰려서 잠깐 뒤 다시" 정도로 안내하고 카운트다운을 준다.
+function isGeminiUpstreamUnavailableError(error) {
+    return error?.code === 'GEMINI_UPSTREAM_UNAVAILABLE'
+        || (Number(error?.status) >= 500 && Number(error?.status) <= 599);
+}
+
 async function showGeminiRetryCountdown(error) {
     if (aiProgressTimer) clearInterval(aiProgressTimer);
     aiProgressTimer = null;
@@ -108,13 +115,20 @@ async function showGeminiRetryCountdown(error) {
     const heading = document.getElementById('ai-progress-heading');
     const status = document.getElementById('ai-progress-status');
     const timer = document.getElementById('ai-progress-percent');
-    let remaining = Math.max(1, Math.ceil(Number(error?.retryAfterSeconds) || 60));
+    const unavailable = isGeminiUpstreamUnavailableError(error);
+    // 부하 문제는 즉시 몰릴수록 더 밀린다. 기본 대기를 30초로 늘리고,
+    // 서버가 알려준 retryAfterSeconds가 있으면 그 값을 우선한다.
+    const fallbackSeconds = unavailable ? 30 : 60;
+    let remaining = Math.max(1, Math.ceil(Number(error?.retryAfterSeconds) || fallbackSeconds));
 
     overlay.classList.add('rate-limited');
     overlay.style.display = 'flex';
-    heading.textContent = 'Gemini 호출 대기';
+    heading.textContent = unavailable ? 'Gemini 부하로 대기' : 'Gemini 호출 대기';
+    const messagePrefix = unavailable
+        ? '지금 Gemini에 요청이 몰려'
+        : '분당 호출 초과로';
     while (remaining > 0) {
-        status.textContent = `분당 호출 초과로 ${remaining}초 뒤에 다시 실행 부탁드립니다.`;
+        status.textContent = `${messagePrefix} ${remaining}초 뒤에 다시 실행 부탁드립니다.`;
         timer.textContent = `${remaining}초`;
         await new Promise(resolve => setTimeout(resolve, 1000));
         remaining -= 1;
@@ -903,6 +917,9 @@ async function analyzeNotice() {
         if (isGeminiRateLimitError(error)) {
             setStatus('Gemini 분당 호출 한도를 초과했습니다.', true);
             await showGeminiRetryCountdown(error);
+        } else if (isGeminiUpstreamUnavailableError(error)) {
+            setStatus('Gemini에 요청이 몰려 잠깐 응답을 받지 못했습니다.', true);
+            await showGeminiRetryCountdown(error);
         } else {
             // 로컬처럼 GEMINI_API_KEY가 없으면 여기로 온다. 수동 입력으로 계속 진행 가능.
             setStatus(`AI 분석을 쓸 수 없습니다(${error.message}). 아래에서 직접 입력해주세요.`, true);
@@ -1384,9 +1401,13 @@ async function generateAIAndSave() {
                 // 분석은 부가 정보일 뿐이므로 실패해도 공지 저장 자체는 막지 않는다.
                 // 할당량 초과는 일시적인데 이걸로 작성한 내용을 통째로 잃으면 안 된다.
                 console.error('저장 직전 분석 실패:', error);
-                analysisFailure = isGeminiRateLimitError(error)
-                    ? 'Gemini 분당 호출 한도를 초과해 AI 요약·카테고리를 채우지 못했습니다.'
-                    : `AI 분석에 실패해 요약·카테고리를 채우지 못했습니다(${error.message}).`;
+                if (isGeminiRateLimitError(error)) {
+                    analysisFailure = 'Gemini 분당 호출 한도를 초과해 AI 요약·카테고리를 채우지 못했습니다.';
+                } else if (isGeminiUpstreamUnavailableError(error)) {
+                    analysisFailure = 'Gemini에 요청이 몰려 AI 요약·카테고리를 채우지 못했습니다. 잠시 후 다시 시도해주세요.';
+                } else {
+                    analysisFailure = `AI 분석에 실패해 요약·카테고리를 채우지 못했습니다(${error.message}).`;
+                }
                 aiSummary = existing?.aiSummary || [];
                 categoryIds = existing?.categoryIds || [];
                 surveyReward = existing?.surveyReward || '';
@@ -1455,7 +1476,7 @@ async function generateAIAndSave() {
         finishAiProgress(editingNoticeId ? '공지 수정이 완료되었습니다.' : '공지 등록이 완료되었습니다.');
         await new Promise(resolve => setTimeout(resolve, 250));
     } catch (error) {
-        if (isGeminiRateLimitError(error)) {
+        if (isGeminiRateLimitError(error) || isGeminiUpstreamUnavailableError(error)) {
             await showGeminiRetryCountdown(error);
         } else {
             alert(`공지 저장 실패: ${error.message}`);
