@@ -27,22 +27,22 @@
         const style = document.createElement('style');
         style.id = 'notice-card-admin-style';
         style.textContent = `
+/* 왼쪽 드래그 핸들처럼 hover에서만 띄우지 않는다. 그러면 마우스를 올려보기
+   전에는 기능이 있다는 단서가 없고, 무엇보다 hover가 없는 모바일에서는 아예
+   닿을 수가 없다. 이 파일은 관리자에게만 내려가므로 항상 보여도 학생 화면에는
+   영향이 없다. 평소에는 흐릿하게 두고 hover에서 또렷해진다. */
 .card-admin-controls {
     position: absolute;
     top: 10px;
     right: 10px;
     z-index: 4;
-    opacity: 0;
-    transform: translateX(5px);
-    pointer-events: none;
-    transition: opacity 0.15s ease, transform 0.15s ease;
+    opacity: 0.75;
+    transition: opacity 0.15s ease;
 }
 .card:hover .card-admin-controls,
 .card:focus-within .card-admin-controls,
 .card-admin-controls.is-open {
     opacity: 1;
-    transform: translateX(0);
-    pointer-events: auto;
 }
 .card-admin-menu-trigger {
     width: 28px;
@@ -63,6 +63,11 @@
     color: var(--primary);
     border-color: var(--primary);
     outline: none;
+}
+/* 손가락으로 누르는 화면에서는 28px 폭이 너무 좁다. */
+@media (pointer: coarse) {
+    .card-admin-menu-trigger { width: 40px; height: 40px; }
+    #${MENU_ID} button { padding: 13px 14px; }
 }
 #${MENU_ID} {
     position: fixed;
