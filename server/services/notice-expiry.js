@@ -108,3 +108,40 @@ export function getNoticeLifecycleState({
         isInGracePeriod: deadlinePassed && !isExpired && Number.isFinite(expiryTime)
     };
 }
+
+/* 고정에는 두 갈래가 있다. isPinned는 관리자가 편집 폼에서 켠 무기한 고정이고,
+   pinnedUntil은 카드 메뉴로 건 기한부 고정이다. 둘 중 하나만 참이어도 고정이다.
+   기한이 지난 값을 지우는 배치는 두지 않는다. 읽을 때마다 시각으로 판정하므로
+   저절로 풀린다. 마감·유예를 다루는 방식과 같다. */
+export function isNoticePinnedNow({ isPinned = false, pinnedUntil = null } = {}, now = new Date()) {
+    if (isPinned === true) return true;
+    if (!pinnedUntil) return false;
+    const until = new Date(pinnedUntil).getTime();
+    const nowTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    return Number.isFinite(until) && until > nowTime;
+}
+
+const PIN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/* 기한부 고정이 풀리는 시각. 7일 뒤와 마감 시각 중 빠른 쪽이다.
+   마감이 이미 지났으면 null을 돌려주고, 부르는 쪽이 거절한다.
+
+   날짜만 있는 deadline은 normalizeDeadlineAt에 맡긴다. 직접 문자열을 이어 붙이면
+   타임존이 빠져 서버 로컬 시간으로 읽히고, Render는 UTC라 마감이 9시간 밀린다. */
+export function computePinnedUntil({ deadlineAt = null, deadline = null } = {}, now = new Date()) {
+    const nowTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    const window = nowTime + PIN_WINDOW_MS;
+
+    let deadlineTime = null;
+    try {
+        const normalized = normalizeDeadlineAt(deadlineAt || deadline);
+        if (normalized) deadlineTime = new Date(normalized).getTime();
+    } catch {
+        // 읽을 수 없는 마감이라면 기간만 보고 정한다. 고정을 막을 이유는 아니다.
+        deadlineTime = null;
+    }
+
+    if (!Number.isFinite(deadlineTime)) return new Date(window).toISOString();
+    if (deadlineTime <= nowTime) return null;
+    return new Date(Math.min(deadlineTime, window)).toISOString();
+}

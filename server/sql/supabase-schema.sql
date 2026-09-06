@@ -11,6 +11,9 @@ create table if not exists public.notices (
   expires_at timestamptz,
   is_always_open boolean not null default false,
   is_pinned boolean not null default false,
+  -- 카드 메뉴로 건 상단 고정. is_pinned는 관리자가 풀 때까지 무기한이고,
+  -- 이쪽은 시각이 지나면 저절로 풀린다. 둘 중 하나만 참이어도 고정이다.
+  pinned_until timestamptz,
   is_hidden boolean not null default false,
   category text check (category is null or category in ('ACADEMIC', 'OPPORTUNITY', 'SURVEY', 'BENEFIT', 'COMMUNITY')),
   has_reward boolean not null default false,
@@ -234,6 +237,7 @@ alter table public.notices
   add column if not exists expires_at timestamptz,
   add column if not exists is_always_open boolean not null default false,
   add column if not exists is_pinned boolean not null default false,
+  add column if not exists pinned_until timestamptz,
   add column if not exists is_hidden boolean not null default false,
   add column if not exists category text,
   add column if not exists has_reward boolean not null default false,
@@ -490,6 +494,16 @@ alter table public.notification_jobs
   add column if not exists claimed_at timestamptz,
   add column if not exists claim_token uuid;
 
+-- 리마인드는 같은 공지에 여러 번 보낼 수 있어야 한다. 그래서 (notice_id, kind)
+-- 통짜 제약을 걷어내고, "새 공지 알림은 공지당 한 번"만 부분 인덱스로 남긴다.
+-- 리마인드 중복은 쿨다운과 진행 중 검사로 서버가 막는다.
+alter table public.notification_jobs
+  drop constraint if exists notification_jobs_notice_id_kind_key;
+
+create unique index if not exists notification_jobs_new_notice_once
+  on public.notification_jobs (notice_id)
+  where kind = 'new_notice';
+
 create table if not exists public.notification_deliveries (
   id bigint generated always as identity primary key,
   job_id bigint not null references public.notification_jobs(id) on delete cascade,
@@ -653,7 +667,7 @@ begin
   if should_notify then
     insert into public.notification_jobs (notice_id, kind, status)
     values (created_row.id, 'new_notice', 'pending')
-    on conflict (notice_id, kind) do nothing;
+    on conflict (notice_id) where kind = 'new_notice' do nothing;
   end if;
 
   return next created_row;
@@ -745,7 +759,7 @@ begin
   if should_notify then
     insert into public.notification_jobs (notice_id, kind, status)
     values (updated_row.id, 'new_notice', 'pending')
-    on conflict (notice_id, kind) do nothing;
+    on conflict (notice_id) where kind = 'new_notice' do nothing;
   end if;
 
   if edits ? 'categoryIds' then

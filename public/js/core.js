@@ -579,6 +579,38 @@ async function loadData() {
 
     await Promise.all([settingsTask, loadBannerSlides()]);
     startBannerPolling();
+    // Promise.all에 넣지 않는다. 관리자 확인이 느리거나 실패해도 공개 화면
+    // 렌더를 붙잡으면 안 된다. 던져 놓고 잊는다.
+    loadNoticeCardAdminExtension();
+}
+
+/* 관리자로 로그인한 상태에서만 카드 관리 메뉴를 내려받는다.
+
+   학생이 받는 번들에는 관리자 UI가 들어가지 않는다는 원칙을 지키면서도,
+   관리자는 학생이 보는 그 화면 그대로에서 조작할 수 있어야 한다. 그래서
+   index.html에는 <script> 태그를 두지 않고 여기서 세션을 확인한 뒤 주입한다.
+   학생 입장에서는 401 응답 하나가 오갈 뿐 스크립트는 요청되지도 않는다.
+
+   sessionStorage 토큰이 아니라 세션 쿠키를 보는 이유는, 관리자 화면에서 공개
+   화면을 새 탭으로 열면 sessionStorage가 따라오지 않기 때문이다. */
+async function loadNoticeCardAdminExtension() {
+    if (document.getElementById('notice-card-admin-script')) return;
+
+    let session;
+    try {
+        session = await apiRequest('/api/admin/session', { method: 'GET' });
+    } catch {
+        return;
+    }
+    if (!session?.authenticated) return;
+    // 배너 관리자에게는 공지 권한이 없다.
+    if (session.role !== 'notice' && session.role !== 'master') return;
+
+    const script = document.createElement('script');
+    script.id = 'notice-card-admin-script';
+    script.src = '/js/notice-card-admin.js';
+    script.onerror = () => console.error('공지 카드 관리 메뉴를 불러오지 못했습니다.');
+    document.head.appendChild(script);
 }
 
 // 엠블럼은 어디서 눌러도 쿼리·해시·상세 상태가 없는 홈을 새 문서로 다시 연다.
@@ -1196,6 +1228,30 @@ function formatDateWithWeekday(value) {
 
 // 공지 제목·기관·배너 문구는 관리자가 자유롭게 입력하므로, HTML로 조립하기 전에 반드시 이스케이프한다.
 // 따옴표까지 처리해야 value="..." 같은 속성 안에 넣어도 빠져나가지 못한다.
+/* 카드에 무언가를 더 얹고 싶을 때 꽂는 자리. desktop.js·mobile.js가 쓰는
+   registerViewModule()과 같은 모양이다.
+
+   지금 쓰는 곳은 관리자 카드 메뉴 하나뿐이고, 그 코드는 index.html에 정적으로
+   실리지 않는다. 관리자 세션이 확인된 뒤에만 내려받아 여기에 등록한다.
+   확장이 없으면 학생이 받는 DOM은 이 기능이 없던 때와 완전히 같다. */
+let noticeCardExtension = null;
+
+function registerNoticeCardExtension(extension) {
+    noticeCardExtension = extension;
+    renderNoticeCards();
+}
+
+/* 서버의 isNoticePinnedNow와 같은 규칙. 무기한 isPinned와 기한부 pinnedUntil을
+   함께 본다. 정렬은 서버가 하지만 배지는 여기서 붙이므로 판정이 어긋나면
+   목록 맨 위 카드에 「고정」이 안 뜨는 일이 생긴다.
+   server/services/notice-expiry.js와 함께 고쳐야 한다. */
+function isNoticePinnedNow(notice) {
+    if (notice?.isPinned === true) return true;
+    if (!notice?.pinnedUntil) return false;
+    const until = new Date(notice.pinnedUntil).getTime();
+    return Number.isFinite(until) && until > Date.now();
+}
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -2447,7 +2503,7 @@ function renderNoticeCards(animate = false) {
             <div class="card-body">
                 <div class="tags">
                     ${dateTagHtml}
-                    ${notice.isPinned ? '<span class="tag pinned">고정</span>' : ''}
+                    ${isNoticePinnedNow(notice) ? '<span class="tag pinned">고정</span>' : ''}
                     <span class="tag target">${escapeHtml(formatNoticeTargetBadge(notice))}</span>
                     ${notice.host ? `<span class="tag">${escapeHtml(notice.host)}</span>` : ''}
                 </div>
@@ -2464,6 +2520,7 @@ function renderNoticeCards(animate = false) {
         `;
         const splitHandle = card.querySelector('.card-drag-handle');
         splitHandle?.addEventListener('pointerdown', event => onNoticeHandlePointerDown(event, notice.id));
+        noticeCardExtension?.decorate(card, notice);
         grid.appendChild(card);
     });
 
@@ -2807,7 +2864,7 @@ async function openDetail(idStr) {
         ${datePresentation.badgeText
             ? `<span class="tag ${datePresentation.badgeClass}">${escapeHtml(datePresentation.badgeText)}</span>`
             : ''}
-        ${notice.isPinned ? '<span class="tag pinned">고정</span>' : ''}
+        ${isNoticePinnedNow(notice) ? '<span class="tag pinned">고정</span>' : ''}
         <span class="tag target">${escapeHtml(formatNoticeTargetBadge(notice))}</span>
         ${notice.host ? `<span class="tag">${escapeHtml(notice.host)}</span>` : ''}
     `;
@@ -3669,7 +3726,7 @@ function renderCompareSpace(blockIds = compareBlocks) {
                 <div class="compare-col-body">
                     <p class="compare-col-kicker">${escapeHtml([
                         datePresentation.badgeText,
-                        notice.isPinned ? '고정' : '',
+                        isNoticePinnedNow(notice) ? '고정' : '',
                         formatNoticeTargetBadge(notice),
                         notice.host || '기타'
                     ].filter(Boolean).join(' · '))}</p>

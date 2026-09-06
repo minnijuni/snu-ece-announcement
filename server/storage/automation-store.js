@@ -101,6 +101,7 @@ function toSupabaseNotice(row) {
         expiresAt: row.expires_at,
         isAlwaysOpen: row.is_always_open === true,
         isPinned: row.is_pinned === true,
+        pinnedUntil: row.pinned_until || null,
         isHidden: row.is_hidden === true,
         category: row.category || null,
         hasReward: row.has_reward === true,
@@ -410,6 +411,7 @@ function createJsonStore(filePath, canonicalCategories = []) {
                     document.notificationJobs.push({
                         id: nextId(document.notificationJobs),
                         noticeId: notice.id,
+                        kind: 'new_notice',
                         status: 'pending',
                         targets: Array.isArray(notice.targets) ? notice.targets : [],
                         attemptCount: 0,
@@ -480,9 +482,74 @@ function createJsonStore(filePath, canonicalCategories = []) {
             });
         },
 
+        async setPublishedNoticePin(id, { pinnedUntil = null, isPinned = null } = {}) {
+            return mutate(document => {
+                const notice = document.notices.find(item =>
+                    Number(item.id) === Number(id)
+                    && item.status === 'published'
+                    && !item.isDeleted
+                );
+                if (!notice) return null;
+                notice.pinnedUntil = pinnedUntil;
+                if (isPinned !== null) notice.isPinned = Boolean(isPinned);
+                notice.updatedAt = new Date().toISOString();
+                return { ...notice };
+            });
+        },
+
         async listNotificationJobs() {
             const document = await readDocument();
             return document.notificationJobs.map(job => ({ ...job }));
+        },
+
+        /* 리마인드 쿨다운과 진행 중 검사가 보는 창구. 최신순으로 돌려주므로
+           호출한 쪽은 첫 항목만 보면 마지막으로 언제 보냈는지 알 수 있다. */
+        async listNotificationJobsForNotice(noticeId, kind = null) {
+            const document = await readDocument();
+            return document.notificationJobs
+                .filter(job => Number(job.noticeId) === Number(noticeId)
+                    && (kind === null || job.kind === kind))
+                .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+                .map(job => ({ ...job }));
+        },
+
+        async createNotificationJob({ noticeId, kind = 'new_notice' }) {
+            return mutate(document => {
+                const now = new Date().toISOString();
+                // new_notice는 공지당 하나. Supabase의 부분 유니크 인덱스와 같은 규칙을
+                // 파일 모드에서는 코드로 지킨다.
+                if (kind === 'new_notice' && document.notificationJobs.some(job =>
+                    Number(job.noticeId) === Number(noticeId) && job.kind === 'new_notice'
+                )) {
+                    return null;
+                }
+                const job = {
+                    id: nextId(document.notificationJobs),
+                    noticeId: Number(noticeId),
+                    kind,
+                    status: 'pending',
+                    attemptCount: 0,
+                    createdAt: now,
+                    updatedAt: now
+                };
+                document.notificationJobs.push(job);
+                return { ...job };
+            });
+        },
+
+        async recordAuditLog({ action, entityType, entityId, metadata = {} }) {
+            return mutate(document => {
+                const entry = {
+                    id: nextId(document.auditLogs),
+                    action,
+                    entityType,
+                    entityId: String(entityId),
+                    metadata,
+                    createdAt: new Date().toISOString()
+                };
+                document.auditLogs.push(entry);
+                return { ...entry };
+            });
         },
 
         async createManualNotice(payload, { notify = true } = {}) {
@@ -522,6 +589,7 @@ function createJsonStore(filePath, canonicalCategories = []) {
                     document.notificationJobs.push({
                         id: nextId(document.notificationJobs),
                         noticeId: notice.id,
+                        kind: 'new_notice',
                         status: 'pending',
                         attemptCount: 0,
                         createdAt: now,
@@ -1212,6 +1280,24 @@ function createSupabaseStore(supabase, canonicalCategories = []) {
             return data ? toSupabaseNotice(data) : null;
         },
 
+        async setPublishedNoticePin(id, { pinnedUntil = null, isPinned = null } = {}) {
+            const changes = {
+                pinned_until: pinnedUntil,
+                updated_at: new Date().toISOString()
+            };
+            if (isPinned !== null) changes.is_pinned = Boolean(isPinned);
+            const { data, error } = await supabase
+                .from('notices')
+                .update(changes)
+                .eq('id', Number(id))
+                .eq('status', 'published')
+                .eq('is_deleted', false)
+                .select('*, notice_categories(category_id)')
+                .maybeSingle();
+            if (error) throw error;
+            return data ? toSupabaseNotice(data) : null;
+        },
+
         async listNotificationJobs() {
             const { data, error } = await supabase
                 .from('notification_jobs')
@@ -1219,6 +1305,56 @@ function createSupabaseStore(supabase, canonicalCategories = []) {
                 .order('created_at', { ascending: false });
             if (error) throw error;
             return data || [];
+        },
+
+        /* 리마인드 쿨다운과 진행 중 검사가 보는 창구. 최신순으로 돌려주므로
+           호출한 쪽은 첫 항목만 보면 마지막으로 언제 보냈는지 알 수 있다. */
+        async listNotificationJobsForNotice(noticeId, kind = null) {
+            let query = supabase
+                .from('notification_jobs')
+                .select('*')
+                .eq('notice_id', Number(noticeId));
+            if (kind !== null) query = query.eq('kind', kind);
+            const { data, error } = await query.order('created_at', { ascending: false });
+            if (error) throw error;
+            return (data || []).map(job => ({
+                id: Number(job.id),
+                noticeId: Number(job.notice_id),
+                kind: job.kind,
+                status: job.status,
+                createdAt: job.created_at,
+                completedAt: job.completed_at
+            }));
+        },
+
+        async createNotificationJob({ noticeId, kind = 'new_notice' }) {
+            const { data, error } = await supabase
+                .from('notification_jobs')
+                .insert({ notice_id: Number(noticeId), kind, status: 'pending' })
+                .select('*')
+                .maybeSingle();
+            // new_notice가 이미 있으면 부분 유니크 인덱스가 막는다. 그건 오류가
+            // 아니라 "이미 보냈다"는 뜻이므로 null로 돌려준다.
+            if (error?.code === '23505') return null;
+            if (error) throw error;
+            return data
+                ? { id: Number(data.id), noticeId: Number(data.notice_id), kind: data.kind, status: data.status }
+                : null;
+        },
+
+        async recordAuditLog({ action, entityType, entityId, metadata = {} }) {
+            const { data, error } = await supabase
+                .from('automation_audit_logs')
+                .insert({
+                    action,
+                    entity_type: entityType,
+                    entity_id: String(entityId),
+                    metadata
+                })
+                .select('*')
+                .maybeSingle();
+            if (error) throw error;
+            return data || null;
         },
 
         async listPendingNotificationJobs(batchSize = 50) {

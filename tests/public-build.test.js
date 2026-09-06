@@ -2507,3 +2507,59 @@ test('the legal pages name the same operators as the operator page', async () =>
     // 약관은 곳곳에서 '운영자'를 주어로 쓰므로 처음에 정의해야 한다.
     assert.match(terms, /이하 &ldquo;운영자&rdquo;/);
 });
+
+/* 관리자 카드 메뉴는 관리자로 로그인했을 때만 내려간다. index.html에 <script>
+   태그로 실리면 학생도 그 코드를 받게 되고, README가 못 박은 "학생 번들에는
+   관리자 UI가 없다"가 조용히 깨진다. 원칙을 여기에 못 박아 둔다. */
+test('the notice card admin menu never ships in the student bundle', async () => {
+    const html = await readFile('index.html', 'utf8');
+    assert.doesNotMatch(html, /notice-card-admin/);
+
+    // 카드 메뉴의 문구도 마찬가지다. core.js는 꽂을 자리만 알아야 한다.
+    const core = await readFile('js/core.js', 'utf8');
+    assert.doesNotMatch(core, /알림 주기|공지 상단으로 보내기|card-admin-menu-trigger/);
+    assert.match(core, /function registerNoticeCardExtension/);
+    assert.match(core, /noticeCardExtension\?\.decorate\(card, notice\)/);
+});
+
+// 확장이 등록되지 않은 상태, 곧 학생이 보는 상태에서는 훅이 아무 일도 하지
+// 않아야 한다. decorate가 없다고 카드 렌더가 통째로 죽으면 안 된다.
+test('the card render survives with no extension registered', async () => {
+    const core = await readFile('js/core.js', 'utf8');
+    const registration = readNamedFunction(core, 'registerNoticeCardExtension');
+
+    const context = { rendered: 0, renderNoticeCards() { context.rendered += 1; } };
+    runInNewContext(`
+        let noticeCardExtension = null;
+        ${registration}
+        const card = {};
+        const notice = { id: 1 };
+        noticeCardExtension?.decorate(card, notice);
+        registerNoticeCardExtension({ decorate: () => { card.decorated = true; } });
+        noticeCardExtension?.decorate(card, notice);
+        result = { decorated: card.decorated === true };
+    `, context);
+
+    assert.equal(context.result.decorated, true);
+    assert.equal(context.rendered, 1);
+});
+
+// 관리자 스크립트도 배포 산출물에 들어가야 한다. 정적 참조가 없으니
+// 복사에서 빠져도 아무 화면이 깨지지 않아 눈치채기 어렵다.
+test('preparePublic carries the admin card menu into the build output', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'ece-public-admin-'));
+    await mkdir(path.join(rootDir, 'css'));
+    await mkdir(path.join(rootDir, 'js'));
+    await writeFile(path.join(rootDir, 'index.html'), '<main>ok</main>');
+    await writeFile(path.join(rootDir, 'css/core.css'), 'body{}');
+    await writeFile(path.join(rootDir, 'js/core.js'), 'window.ok=true');
+    await writeFile(path.join(rootDir, 'js/notice-card-admin.js'), 'window.adminMenu=true');
+
+    await preparePublic({ rootDir });
+
+    const copied = await readFile(
+        path.join(rootDir, 'public', 'js', 'notice-card-admin.js'),
+        'utf8'
+    );
+    assert.equal(copied, 'window.adminMenu=true');
+});

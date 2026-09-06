@@ -16,7 +16,9 @@ import { buildKakaoBackfillDrafts } from './services/kakao-backfill.js';
 import { createOcrService } from './services/ocr-service.js';
 import {
     calculateNoticeLifecycle,
+    computePinnedUntil,
     getNoticeLifecycleState,
+    isNoticePinnedNow,
     normalizeDeadlineAt
 } from './services/notice-expiry.js';
 import { getAutomationConfig } from './config/runtime-config.js';
@@ -30,7 +32,7 @@ import { createNoticeThumbnailRouter } from './routes/notice-thumbnail-route.js'
 import { createNoticeThumbnailService } from './services/notice-thumbnail-service.js';
 import { createNoticeImageStore } from './services/notice-image-store.js';
 import webPush from 'web-push';
-import { createPushService } from './services/push-service.js';
+import { createPushService, matchesSubscription } from './services/push-service.js';
 import {
     buildNoticePermalink,
     createKakaoBotWebhookService
@@ -923,6 +925,7 @@ function toClientNotice(row) {
         expiresAt: row.expiresAt || row.expires_at || null,
         isAlwaysOpen: row.isAlwaysOpen === true || row.is_always_open === true,
         isPinned: row.isPinned === true || row.is_pinned === true,
+        pinnedUntil: row.pinnedUntil || row.pinned_until || null,
         isHidden: row.isHidden === true || row.is_hidden === true,
         category: row.category || null,
         hasReward: row.hasReward === true || row.has_reward === true,
@@ -966,6 +969,7 @@ function toNoticeSummary(row) {
         expiresAt: notice.expiresAt,
         isAlwaysOpen: notice.isAlwaysOpen,
         isPinned: notice.isPinned,
+        pinnedUntil: notice.pinnedUntil,
         isHidden: notice.isHidden,
         category: notice.category,
         hasReward: notice.hasReward,
@@ -1514,7 +1518,9 @@ function applyNoticeListFilters(rows, filters, { now = new Date() } = {}) {
         const b = toClientNotice(right);
         const aState = getNoticeLifecycleState(a, now);
         const bState = getNoticeLifecycleState(b, now);
-        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+        const aPinned = isNoticePinnedNow(a, now);
+        const bPinned = isNoticePinnedNow(b, now);
+        if (aPinned !== bPinned) return aPinned ? -1 : 1;
         const lifecycleGroup = state => state.isExpired ? 2 : (state.isInGracePeriod ? 1 : 0);
         const lifecycleDifference = lifecycleGroup(aState) - lifecycleGroup(bState);
         if (lifecycleDifference !== 0) return lifecycleDifference;
@@ -1604,7 +1610,7 @@ async function listNoticeFilterRows() {
         const { data, error } = await supabase
             .from(SUPABASE_NOTICES_TABLE)
             .select(`
-                id,title,content,target,targets,host,deadline,deadline_at,start_date,expires_at,is_always_open,is_pinned,is_hidden,
+                id,title,content,target,targets,host,deadline,deadline_at,start_date,expires_at,is_always_open,is_pinned,pinned_until,is_hidden,
                 category,has_reward,reward_note,requires_action,survey_reward,
                 ai_summary,keywords,ocr_text,views,
                 source_type,source_published_at,created_at,updated_at,last_crawled_at,has_images,notice_categories(category_id)
@@ -1938,6 +1944,69 @@ async function setNoticeHidden(id, hidden) {
         .maybeSingle();
     if (error) throw error;
     return data ? toClientNotice(data) : null;
+}
+
+/* 고정을 걸고 푼다. setNoticeHidden과 같은 모양이다. 수동 공지는 notices.json에,
+   자동 수집 공지는 automationStore에 있어서 파일 모드는 두 곳을 다 봐야 한다.
+
+   푸는 쪽은 pinnedUntil만이 아니라 isPinned도 함께 끈다. 어느 경로로 고정됐든
+   화면에는 똑같이 「고정」으로 보이므로, 해제를 눌렀는데 안 풀리면 버그로 읽힌다. */
+async function setNoticePin(id, pinned, now = new Date()) {
+    const pinnedUntil = pinned ? computePinnedUntil(await getNoticeForPin(id), now) : null;
+    if (pinned && !pinnedUntil) return { error: 'DEADLINE_PASSED' };
+
+    if (!useSupabase) {
+        const notices = await readNotices();
+        const idx = notices.findIndex(notice => Number(notice.id) === id && !notice.isDeleted);
+        if (idx >= 0) {
+            notices[idx] = {
+                ...notices[idx],
+                pinnedUntil,
+                ...(pinned ? {} : { isPinned: false }),
+                updatedAt: new Date().toISOString()
+            };
+            await writeNotices(notices);
+            return { notice: notices[idx] };
+        }
+        const updated = await automationStore.setPublishedNoticePin(id, {
+            pinnedUntil,
+            isPinned: pinned ? null : false
+        });
+        return { notice: updated };
+    }
+
+    const changes = { pinned_until: pinnedUntil, updated_at: new Date().toISOString() };
+    if (!pinned) changes.is_pinned = false;
+    const { data, error } = await supabase
+        .from(SUPABASE_NOTICES_TABLE)
+        .update(changes)
+        .eq('id', id)
+        .eq('is_deleted', false)
+        .eq('status', 'published')
+        .select('*, notice_categories(category_id)')
+        .maybeSingle();
+    if (error) throw error;
+    return { notice: data ? toClientNotice(data) : null };
+}
+
+/* 만료 시각을 계산하려면 마감 정보가 필요하다. 목록 전체를 훑지 않고 하나만 읽는다. */
+async function getNoticeForPin(id) {
+    if (!useSupabase) {
+        const notices = await readNotices();
+        const manual = notices.find(notice => Number(notice.id) === id && !notice.isDeleted);
+        if (manual) return toClientNotice(manual);
+        const automated = await automationStore.getAutomationNotice(id);
+        return automated ? toClientNotice(automated) : {};
+    }
+    const { data, error } = await supabase
+        .from(SUPABASE_NOTICES_TABLE)
+        .select('id,deadline,deadline_at,is_always_open')
+        .eq('id', id)
+        .eq('is_deleted', false)
+        .eq('status', 'published')
+        .maybeSingle();
+    if (error) throw error;
+    return data ? toClientNotice(data) : {};
 }
 
 function isPromoSlotPublic(row, now = Date.now()) {
@@ -3350,6 +3419,92 @@ app.patch('/api/notices/:id/visibility', requireNoticeAdmin, async (req, res) =>
         res.json({ notice: toNoticeSummary(notice) });
     } catch (error) {
         res.status(500).json({ error: error.message || '공지 공개 상태 변경 실패' });
+    }
+});
+
+/* 카드 메뉴의 「공지 상단으로 보내기」. 만료 시각은 서버가 정한다.
+   클라이언트가 기간을 보내오면 그 값을 검증할 규칙이 또 필요해진다. */
+app.patch('/api/notices/:id/pin', requireNoticeAdmin, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isSafeInteger(id)) {
+            return res.status(400).json({ error: '유효하지 않은 id입니다.' });
+        }
+        if (typeof req.body?.pinned !== 'boolean') {
+            return res.status(400).json({ error: 'pinned는 true 또는 false여야 합니다.' });
+        }
+
+        const result = await setNoticePin(id, req.body.pinned);
+        if (result.error === 'DEADLINE_PASSED') {
+            return res.status(400).json({
+                error: '마감이 지난 공지는 고정할 수 없습니다. 목록에서 이미 아래로 내려가 있습니다.'
+            });
+        }
+        if (!result.notice) return res.status(404).json({ error: '공지 없음' });
+        res.json({ notice: toNoticeSummary(result.notice) });
+    } catch (error) {
+        res.status(500).json({ error: error.message || '공지 고정 변경 실패' });
+    }
+});
+
+const REMINDER_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+/* 카드 메뉴의 「알림 주기」. 카카오톡 공지방에서 마감 임박 공지를 다시 올리던
+   운영 습관을 웹 푸시로 옮긴 것이다.
+
+   같은 공지에 여러 번 보낼 수 있어야 하므로 notification_jobs의 통짜 유니크
+   제약을 부분 인덱스로 바꿨다. 대신 남발을 두 겹으로 막는다. 24시간 쿨다운과,
+   아직 처리되지 않은 리마인드가 남아 있으면 새로 쌓지 않는 검사다. */
+app.post('/api/notices/:id/reminder', requireNoticeAdmin, async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isSafeInteger(id)) {
+            return res.status(400).json({ error: '유효하지 않은 id입니다.' });
+        }
+        if (!automationConfig.push.enabled) {
+            return res.status(503).json({ error: '웹 푸시가 설정되지 않아 알림을 보낼 수 없습니다.' });
+        }
+
+        const notice = await getPublishedNoticeById(id);
+        if (!notice || notice.isHidden) {
+            return res.status(404).json({ error: '게시 중인 공지가 아닙니다.' });
+        }
+
+        const previous = await automationStore.listNotificationJobsForNotice(id, 'reminder');
+        if (previous.some(job => job.status === 'pending' || job.status === 'processing')) {
+            return res.status(409).json({
+                error: '아직 보내는 중인 리마인드가 있습니다. 처리가 끝난 뒤에 다시 시도해주세요.',
+                retryAfterHours: 0
+            });
+        }
+        const last = previous[0];
+        const sinceLast = last?.createdAt ? Date.now() - new Date(last.createdAt).getTime() : null;
+        if (sinceLast !== null && sinceLast < REMINDER_COOLDOWN_MS) {
+            const retryAfterHours = Math.ceil((REMINDER_COOLDOWN_MS - sinceLast) / 3_600_000);
+            return res.status(409).json({
+                error: `최근에 이미 알림을 보냈습니다. ${retryAfterHours}시간 뒤에 다시 보낼 수 있습니다.`,
+                retryAfterHours
+            });
+        }
+
+        const job = await automationStore.createNotificationJob({ noticeId: id, kind: 'reminder' });
+        if (!job) return res.status(500).json({ error: '알림 작업을 만들지 못했습니다.' });
+
+        const subscriptions = await automationStore.listPushSubscriptions();
+        const recipients = subscriptions.filter(subscription =>
+            subscription.status === 'active' && matchesSubscription(notice, subscription)
+        ).length;
+
+        await automationStore.recordAuditLog({
+            action: 'notice.reminder_sent',
+            entityType: 'notice',
+            entityId: String(id),
+            metadata: { jobId: job.id, recipients }
+        });
+
+        res.status(201).json({ job: { id: job.id, kind: job.kind }, recipients });
+    } catch (error) {
+        res.status(500).json({ error: error.message || '리마인드 발송 실패' });
     }
 });
 

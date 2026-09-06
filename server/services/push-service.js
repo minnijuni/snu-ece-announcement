@@ -100,6 +100,7 @@ export function createPushService({ store, webPushClient, config, now = () => ne
     }
 
     async function processJob(job) {
+        const isReminder = job.kind === 'reminder';
         const notice = job.noticeSnapshot || await store.getAutomationNotice(job.noticeId);
         if (!notice || notice.status !== 'published') {
             await store.updateNotificationJob(job.id, {
@@ -150,10 +151,12 @@ export function createPushService({ store, webPushClient, config, now = () => ne
                         auth: subscription.auth
                     }
                 }, JSON.stringify({
-                    title: notice.title,
+                    title: isReminder ? `[마감 임박] ${notice.title}` : notice.title,
                     body: (notice.aiSummary?.[0] || notice.content || '').slice(0, 180),
                     url: `/?id=${encodeURIComponent(notice.id)}`,
-                    tag: `notice-${notice.id}`
+                    // 태그가 같으면 브라우저가 이전 알림을 조용히 덮어쓴다. 리마인드가
+                    // 새 알림으로 뜨지 않고 원래 알림을 갈아치우면 기능이 무의미해진다.
+                    tag: isReminder ? `notice-${notice.id}-r${job.id}` : `notice-${notice.id}`
                 }), { TTL: 300, timeout: 30_000 });
                 await store.updateNotificationDelivery(delivery.id, {
                     status: 'sent',
