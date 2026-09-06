@@ -581,21 +581,15 @@ async function loadData() {
     startBannerPolling();
     // Promise.all에 넣지 않는다. 관리자 확인이 느리거나 실패해도 공개 화면
     // 렌더를 붙잡으면 안 된다. 던져 놓고 잊는다.
-    loadNoticeCardAdminExtension();
+    applyAdminSession();
 }
 
-/* 관리자로 로그인한 상태에서만 카드 관리 메뉴를 내려받는다.
-
-   학생이 받는 번들에는 관리자 UI가 들어가지 않는다는 원칙을 지키면서도,
-   관리자는 학생이 보는 그 화면 그대로에서 조작할 수 있어야 한다. 그래서
-   index.html에는 <script> 태그를 두지 않고 여기서 세션을 확인한 뒤 주입한다.
-   학생 입장에서는 401 응답 하나가 오갈 뿐 스크립트는 요청되지도 않는다.
+/* 로그인한 관리자에게만 공개 화면의 모습을 바꾼다. 세션은 한 번만 묻고
+   그 결과로 푸터 링크와 카드 메뉴를 함께 정한다.
 
    sessionStorage 토큰이 아니라 세션 쿠키를 보는 이유는, 관리자 화면에서 공개
    화면을 새 탭으로 열면 sessionStorage가 따라오지 않기 때문이다. */
-async function loadNoticeCardAdminExtension() {
-    if (document.getElementById('notice-card-admin-script')) return;
-
+async function applyAdminSession() {
     let session;
     try {
         session = await apiRequest('/api/admin/session', { method: 'GET' });
@@ -603,8 +597,30 @@ async function loadNoticeCardAdminExtension() {
         return;
     }
     if (!session?.authenticated) return;
+
+    pointFooterLinkAtWorkspace();
     // 배너 관리자에게는 공지 권한이 없다.
-    if (session.role !== 'notice' && session.role !== 'master') return;
+    if (session.role === 'notice' || session.role === 'master') {
+        loadNoticeCardAdminExtension();
+    }
+}
+
+/* 이미 로그인해 있는데 푸터가 "관리자 로그인"을 가리키면 로그인 화면을 한 번
+   더 거쳐야 한다. 관리자 화면의 「공지방 보기」와 짝을 이루는 돌아가는 길이다.
+   정적 호스트에는 /admin 경로에 파일이 없으므로 파일 이름을 쓴다. */
+function pointFooterLinkAtWorkspace() {
+    const link = document.getElementById('footer-admin-link') || footerAdminLinkNode;
+    if (!link) return;
+    link.href = './admin.html';
+    link.textContent = '관리자 화면';
+}
+
+/* 카드 관리 메뉴는 index.html에 <script> 태그로 실리지 않는다. 학생이 받는
+   번들에는 관리자 UI가 들어가지 않는다는 원칙을 지키면서도, 관리자는 학생이
+   보는 그 화면 그대로에서 조작할 수 있어야 하기 때문이다. 학생 입장에서는
+   401 응답 하나가 오갈 뿐 스크립트는 요청되지도 않는다. */
+function loadNoticeCardAdminExtension() {
+    if (document.getElementById('notice-card-admin-script')) return;
 
     const script = document.createElement('script');
     script.id = 'notice-card-admin-script';

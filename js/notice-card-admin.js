@@ -320,7 +320,9 @@
 
     function editNotice(notice) {
         // admin.js가 이미 읽는 딥링크다. 새 경로가 아니다.
-        window.location.assign(`/admin/workspace?edit=${encodeURIComponent(notice.id)}`);
+        // 서버가 라우팅하는 /admin/workspace는 정적 호스트에 파일이 없어 공개
+        // 화면으로 떨어진다. 파일 이름이라야 양쪽에서 워크스페이스로 간다.
+        window.location.assign(`/admin.html?edit=${encodeURIComponent(notice.id)}`);
     }
 
     async function hideNotice(notice) {
@@ -333,7 +335,7 @@
             // 숨기면 공개 목록에서 사라져 이 화면으로는 되돌릴 수 없다.
             showToast(
                 '공개 목록에서 숨겼습니다. '
-                + '<a href="/admin/workspace">관리자 화면</a>에서 되돌릴 수 있습니다.',
+                + '<a href="/admin.html">관리자 화면</a>에서 되돌릴 수 있습니다.',
                 { duration: 8000 }
             );
             await filterCards();

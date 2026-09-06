@@ -2235,6 +2235,32 @@ test('admin navigation targets files that exist on the static host', async () =>
     assert.doesNotMatch(admin, /location\.replace\(`?'?\/admin(\$\{|'|`)/);
     assert.match(admin, /location\.replace\('\/admin-login\.html'\)/);
     assert.match(admin, /location\.replace\(`\/admin-login\.html\$\{next\}`\)/);
+
+    // 카드 메뉴도 같은 규칙을 따라야 한다. 여기서 /admin/workspace를 쓰면
+    // 로컬 Express에서는 멀쩡하고 Pages에서만 공개 화면으로 떨어진다.
+    // 주석에 경로 이름이 나오는 것은 괜찮다. 문자열로 쓰이는 것만 막는다.
+    const cardMenu = await readFile('js/notice-card-admin.js', 'utf8');
+    assert.doesNotMatch(cardMenu, /['"`]\/admin\/workspace/);
+    assert.match(cardMenu, /\/admin\.html\?edit=/);
+
+    const core = await readFile('js/core.js', 'utf8');
+    assert.doesNotMatch(core, /['"`]\/admin\/workspace/);
+});
+
+/* 로그인한 채로 두 화면을 오갈 수 있어야 한다. 어느 한쪽에 길이 없으면
+   주소를 직접 쳐야 하고, 로그인 화면을 한 번 더 거치게 된다. */
+test('an admin can move between the workspace and the public screen', async () => {
+    const adminHtml = await readFile('admin.html', 'utf8');
+    // 세션을 유지한 채 나가는 링크. exitAdminMode는 로그아웃이라 다른 길이다.
+    assert.match(adminHtml, /id="admin-view-site"[^>]*href="\/index\.html"/);
+
+    const core = await readFile('js/core.js', 'utf8');
+    assert.match(core, /function pointFooterLinkAtWorkspace/);
+    assert.match(core, /link\.href = '\.\/admin\.html'/);
+
+    // 세션이 없으면 푸터는 원래대로 로그인 화면을 가리켜야 한다.
+    const indexHtml = await readFile('index.html', 'utf8');
+    assert.match(indexHtml, /id="footer-admin-link"[\s\S]*?href="\.\/admin-login\.html"/);
 });
 
 test('no notice title can overflow the text poster box', async () => {

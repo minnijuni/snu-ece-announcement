@@ -25,6 +25,11 @@
     <span class="admin-badge">ADMIN</span>
     <div class="admin-topbar-actions">
         <button type="button" id="staff-report-open" onclick="openStaffReport()">마스터에게 문의</button>
+        <!-- 로그아웃이 아니라 그냥 보러 나가는 길이다. 세션 쿠키는 Path=/라
+             그대로 따라가므로 공개 화면에서도 카드 관리 메뉴가 뜬다.
+             정적 호스트에는 /admin 같은 경로가 없어 파일 이름을 쓴다. -->
+        <a id="admin-view-site" href="/index.html"
+           title="관리자 로그인을 유지한 채 공지방을 봅니다">공지방 보기</a>
         <button type="button" id="admin-mode-exit" onclick="exitAdminMode()">관리자 모드 나가기</button>
     </div>
 </header>
