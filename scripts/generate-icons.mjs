@@ -19,6 +19,9 @@ const EMBED_WIDTH = 820;
 const MASKABLE_GLYPH_SIZE = 410;
 // App Store에 올리는 iOS 마케팅 아이콘 크기.
 const IOS_ICON_SIZE = 1024;
+// 앱 화면 안(헤더·서랍)에 브랜드 마크로 얹는 사본. 서랍에서 154pt까지 커지므로
+// 3배 화면에서도 등배가 되도록 512로 넉넉히 둔다.
+const IOS_MARK_SIZE = 512;
 // 512 좌표계를 1024로 렌더링하기 위한 밀도(기본 72dpi의 두 배).
 // 큰 쪽을 먼저 그리고 줄여야 작은 아이콘의 글자 획이 뭉개지지 않는다.
 const RENDER_DENSITY = 144;
@@ -107,15 +110,27 @@ export async function generateIcons({ rootDir }) {
         .toFile(path.join(iconsDir, 'badge-icon-96.png'));
 
     // iOS 앱 아이콘. 알파 채널이 남아 있으면 App Store Connect가 업로드를 거부한다.
-    const appIconSet = path.join(
-        rootDir, 'ios', 'SNUECENotice', 'Resources', 'Assets.xcassets', 'AppIcon.appiconset'
+    const assetCatalog = path.join(
+        rootDir, 'ios', 'SNUECENotice', 'Resources', 'Assets.xcassets'
     );
+    const appIconSet = path.join(assetCatalog, 'AppIcon.appiconset');
     if (await exists(appIconSet)) {
         await render()
             .resize(IOS_ICON_SIZE, IOS_ICON_SIZE)
             .flatten({ background: BRAND_NAVY })
             .png({ compressionLevel: 9 })
             .toFile(path.join(appIconSet, 'app-icon-1024.png'));
+    }
+
+    // 앱 화면 안에 쓰는 같은 마크. 이쪽은 라운드 바깥이 투명해야 한다.
+    // 남색 서랍 위에서는 모서리가 배경과 이어지고, 밝은 헤더 위에서는
+    // 라운드 타일로 보인다. 평탄화하면 밝은 배경에서 남색 사각형이 튄다.
+    const markSet = path.join(assetCatalog, 'AppMark.imageset');
+    if (await exists(markSet)) {
+        await render()
+            .resize(IOS_MARK_SIZE, IOS_MARK_SIZE)
+            .png({ compressionLevel: 9 })
+            .toFile(path.join(markSet, 'app-mark.png'));
     }
 }
 

@@ -1,6 +1,6 @@
 {
   "images" : [
-    { "filename" : "snu-emblem-navy.png", "idiom" : "universal", "scale" : "1x" },
+    { "filename" : "app-mark.png", "idiom" : "universal", "scale" : "1x" },
     { "idiom" : "universal", "scale" : "2x" },
     { "idiom" : "universal", "scale" : "3x" }
   ],

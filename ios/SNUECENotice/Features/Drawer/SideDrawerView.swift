@@ -88,7 +88,7 @@ struct SideDrawerView: View {
                 board.resetToHome()
                 router.closeDrawer()
             } label: {
-                Image(.snuEmblem)
+                Image(.appMark)
                     .resizable()
                     .scaledToFit()
                     .frame(maxWidth: 154)
@@ -100,12 +100,6 @@ struct SideDrawerView: View {
                 .font(Theme.Typography.serif(size: 20))
                 .tracking(1.6)
                 .foregroundStyle(Theme.Palette.railText)
-                .padding(.top, -12)
-
-            Image(.brandWordmarkLight)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 132)
                 .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)

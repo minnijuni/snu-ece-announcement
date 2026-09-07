@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// 화면 맨 위 제목 줄. 학교 상징과 서비스 워드마크를 한 줄에 세운다.
+/// 화면 맨 위 제목 줄. 서비스 마크와 워드마크를 한 줄에 세운다.
 ///
-/// 데스크톱은 왼쪽 레일에 상징이 이미 있어 제목에는 넣지 않지만, 폰에는
+/// 데스크톱은 왼쪽 레일에 마크가 이미 있어 제목에는 넣지 않지만, 폰에는
 /// 레일이 없으므로 여기가 유일한 자리다.
+///
+/// 밝은 배경 위라 앱 마크의 남색 라운드 타일이 그대로 드러난다. 타일만으로는
+/// 30pt에서 글자를 읽을 수 없으므로 이름은 옆의 워드마크가 맡는다.
 struct BoardHeaderView: View {
     @EnvironmentObject private var board: BoardViewModel
     @EnvironmentObject private var router: AppRouter
@@ -15,7 +18,7 @@ struct BoardHeaderView: View {
                 router.jumpToSearch()
             } label: {
                 HStack(spacing: 9) {
-                    Image(.snuEmblemNavy)
+                    Image(.appMark)
                         .resizable()
                         .scaledToFit()
                         .frame(height: 30)
