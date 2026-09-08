@@ -95,12 +95,6 @@ struct SideDrawerView: View {
             }
             .buttonStyle(PressableStyle(scale: 0.98))
             .accessibilityLabel("SNU ECE 공지방 홈으로 돌아가기")
-
-            Text("서울대학교")
-                .font(Theme.Typography.serif(size: 20))
-                .tracking(1.6)
-                .foregroundStyle(Theme.Palette.railText)
-                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
     }
