@@ -19,6 +19,18 @@
              태그는 added(추가) / changed(개선) / fixed(수정) / policy(정책) 넷을 쓴다. -->
         <ol class="changelog-list" id="changelog-list">
             <li class="changelog-entry">
+                <div class="changelog-date"><time datetime="2026-09-10">2026.09.10</time></div>
+                <div class="changelog-body">
+                    <h2>공지 사진 로딩 안내와 전환 안정화</h2>
+                    <ul>
+                        <li><span class="changelog-tag is-changed">개선</span>공지 상세와 크게 보기에서 사진을 불러오는 동안 로딩 안내를 표시합니다. 사진을 기다리는 동안에도 상세 화면의 요약과 본문은 읽을 수 있습니다.</li>
+                        <li><span class="changelog-tag is-added">추가</span>사진을 불러오지 못하거나 30초 넘게 기다리면 &lsquo;다시 시도&rsquo; 버튼이 나타납니다.</li>
+                        <li><span class="changelog-tag is-fixed">수정</span>사진을 넘길 때 이전 사진이 남아 있지 않도록 하고, 새 사진이 표시할 준비를 마친 뒤 보여줍니다.</li>
+                        <li><span class="changelog-tag is-fixed">수정</span>공지나 사진을 빠르게 바꾸거나 화면을 닫았을 때, 늦게 도착한 이전 요청이 현재 화면을 덮어쓰지 않도록 했습니다.</li>
+                    </ul>
+                </div>
+            </li>
+            <li class="changelog-entry">
                 <div class="changelog-date"><time datetime="2026-09-06">2026.09.06</time></div>
                 <div class="changelog-body">
                     <h2>마감 임박 공지 다시 알림</h2>
