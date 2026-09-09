@@ -2134,6 +2134,44 @@ body.reordering-compare-block .compare-trash-zone {
     margin: 0 0 24px; color: var(--text-sub); font-weight: 500;
     padding-bottom: 20px; border-bottom: 1px solid var(--border);
 }
+/* 사진을 기다리는 동안에도 요약과 본문은 그대로 읽을 수 있다. */
+.notice-image-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 48px 60px;
+    color: var(--text-sub);
+    text-align: center;
+    font-size: 14px;
+}
+.notice-image-status[hidden],
+.notice-image-status [hidden] { display: none; }
+.notice-image-retry {
+    min-height: 40px;
+    padding: 8px 16px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.notice-image-retry:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.image-viewer .notice-image-status { color: #fff; }
+.detail-hero[data-image-state="loading"],
+.detail-hero[data-image-state="error"] {
+    min-height: 240px;
+    background: #f4f5f7;
+}
+.detail-hero[data-image-state]:not([data-image-state="ready"]) > img,
+.image-viewer-stage[data-image-state]:not([data-image-state="ready"]) > img {
+    visibility: hidden;
+}
+.detail-image-zoom:disabled { opacity: 0.45; cursor: default; pointer-events: none; }
 .detail-hero { position: relative; margin-bottom: 18px; }
 .detail-hero img {
     width: 100%; max-height: 520px; object-fit: contain;

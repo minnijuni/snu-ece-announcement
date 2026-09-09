@@ -386,6 +386,12 @@
         <button class="detail-image-nav previous" id="detail-image-prev" type="button"
                 aria-label="이전 사진" onclick="navDetailImage(-1, event)">‹</button>
         <img id="detail-hero-img" alt="">
+        <div class="notice-image-status" id="detail-image-status" hidden>
+            <span class="notice-loading-spinner" aria-hidden="true"></span>
+            <span id="detail-image-message" role="status" aria-live="polite"></span>
+            <button class="notice-image-retry" type="button" hidden
+                    onclick="updateDetailImage()">다시 시도</button>
+        </div>
         <button class="detail-image-nav next" id="detail-image-next" type="button"
                 aria-label="다음 사진" onclick="navDetailImage(1, event)">›</button>
         <!-- 확대는 사진을 눌러서가 아니라 이 버튼으로만 연다. 목록에서 공지를
@@ -563,12 +569,18 @@
                     onclick="closeModal('image-viewer-modal')">×</button>
         </div>
     </header>
-    <div class="image-viewer-stage" onclick="event.stopPropagation()"
+    <div class="image-viewer-stage" id="viewer-image-stage" onclick="event.stopPropagation()"
          ontouchstart="startImageSwipe(event)" ontouchend="endImageSwipe(event, 'viewer')">
         <button class="nav-btn left" id="nav-left" type="button" aria-label="이전 사진"
                 onclick="navImage(-1, event)">‹</button>
-        <img id="viewer-img" src="" alt="확대된 공지 이미지"
+        <img id="viewer-img" alt="확대된 공지 이미지"
              title="우클릭으로도 이미지를 복사할 수 있습니다">
+        <div class="notice-image-status" id="viewer-image-status" hidden>
+            <span class="notice-loading-spinner" aria-hidden="true"></span>
+            <span id="viewer-image-message" role="status" aria-live="polite"></span>
+            <button class="notice-image-retry" type="button" hidden
+                    onclick="updateImageViewer()">다시 시도</button>
+        </div>
         <button class="nav-btn right" id="nav-right" type="button" aria-label="다음 사진"
                 onclick="navImage(1, event)">›</button>
     </div>
