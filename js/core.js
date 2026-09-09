@@ -1687,6 +1687,7 @@ function openModal(id) {
 }
 
 function closeModal(id) {
+    if (id === 'image-viewer-modal') resetNoticeImage('viewer');
     const modal = document.getElementById(id);
     if (!modal) return;
     modal.style.display = 'none';
@@ -1877,7 +1878,7 @@ async function reportSummaryMismatch(id, button) {
 
 window.onclick = function(event) {
     if (event.target.classList?.contains('overlay')) {
-        event.target.style.display = 'none';
+        closeModal(event.target.id);
     }
 }
 
@@ -2707,6 +2708,80 @@ function endImageSwipe(event, scope) {
     else navDetailImage(direction);
 }
 
+/* 이전 사진은 즉시 비우고 새 요소를 다운로드·디코딩한 뒤 교체한다.
+   요청별 토큰으로 늦게 도착한 load/error/decode 결과를 무시한다. */
+const noticeImageRequests = new Map();
+let noticeDetailRequestVersion = 0;
+
+function setNoticeImageState(scope, state) {
+    const stage = document.getElementById(scope === 'detail' ? 'detail-hero' : 'viewer-image-stage');
+    const status = document.getElementById(`${scope}-image-status`);
+    const message = document.getElementById(`${scope}-image-message`);
+    if (!stage || !status || !message) return;
+    stage.dataset.imageState = state;
+    stage.setAttribute('aria-busy', String(state === 'loading'));
+    status.hidden = state === 'ready' || state === 'idle';
+    message.textContent = state === 'loading' ? '사진을 불러오는 중입니다…'
+        : state === 'error' ? '사진을 불러오지 못했습니다.' : '';
+    status.querySelector('.notice-loading-spinner').hidden = state !== 'loading';
+    status.querySelector('.notice-image-retry').hidden = state !== 'error';
+    if (scope === 'detail') {
+        document.getElementById('detail-image-zoom').disabled = state !== 'ready';
+    }
+}
+
+function resetNoticeImage(scope) {
+    noticeImageRequests.get(scope)?.cancel();
+    noticeImageRequests.delete(scope);
+    const image = document.getElementById(scope === 'detail' ? 'detail-hero-img' : 'viewer-img');
+    image?.removeAttribute('src');
+    setNoticeImageState(scope, 'idle');
+}
+
+function loadNoticeImage(scope, src) {
+    resetNoticeImage(scope);
+    const image = document.getElementById(scope === 'detail' ? 'detail-hero-img' : 'viewer-img');
+    if (!image || !src) return;
+    setNoticeImageState(scope, 'loading');
+    const candidate = image.cloneNode(false);
+    candidate.decoding = 'async';
+    let timer;
+    let settled = false;
+    const request = {
+        cancel() {
+            settled = true;
+            window.clearTimeout(timer);
+            candidate.onload = null;
+            candidate.onerror = null;
+            candidate.removeAttribute('src');
+        }
+    };
+    noticeImageRequests.set(scope, request);
+    const isCurrent = () => !settled && noticeImageRequests.get(scope) === request;
+    const finish = success => {
+        if (!isCurrent()) return;
+        settled = true;
+        window.clearTimeout(timer);
+        candidate.onload = null;
+        candidate.onerror = null;
+        noticeImageRequests.delete(scope);
+        if (success) image.replaceWith(candidate);
+        else candidate.removeAttribute('src');
+        setNoticeImageState(scope, success ? 'ready' : 'error');
+    };
+    candidate.onload = async () => {
+        try {
+            if (typeof candidate.decode === 'function') await candidate.decode();
+            finish(candidate.naturalWidth > 0);
+        } catch {
+            finish(false);
+        }
+    };
+    candidate.onerror = () => finish(false);
+    timer = window.setTimeout(() => finish(false), 30000);
+    candidate.src = src;
+}
+
 function updateDetailImage() {
     const heroImg = document.getElementById('detail-hero-img');
     const previous = document.getElementById('detail-image-prev');
@@ -2714,7 +2789,7 @@ function updateDetailImage() {
     const counter = document.getElementById('detail-image-counter');
     const src = detailImageArray[detailImageIndex];
     if (!heroImg || !src) return;
-    heroImg.src = src;
+    loadNoticeImage('detail', src);
     const hasMultiple = detailImageArray.length > 1;
     if (previous) previous.hidden = !hasMultiple;
     if (next) next.hidden = !hasMultiple;
@@ -2736,7 +2811,7 @@ function openDetailImageViewer(event) {
 
 function openImageViewer(index) {
     const notice = notices.find(n => String(n.id) === currentViewId);
-    if (!notice || !notice.images) return;
+    if (!notice || !notice.images?.length) return;
     currentImageArray = notice.images;
     currentImageIndex = index;
 
@@ -2754,7 +2829,7 @@ function openImageViewer(index) {
 
 function updateImageViewer() {
     const src = currentImageArray[currentImageIndex];
-    document.getElementById('viewer-img').src = src;
+    loadNoticeImage('viewer', src);
     document.getElementById('viewer-download-btn').href = src;
     document.getElementById('img-counter').innerText = `${currentImageIndex + 1} / ${currentImageArray.length}`;
 }
@@ -2837,20 +2912,24 @@ function hideNoticeLoading() {
 async function openDetail(idStr) {
     cancelNoticeHoverPreview();
     currentViewId = String(idStr);
+    const requestedId = currentViewId;
+    const requestVersion = ++noticeDetailRequestVersion;
+    closeModal('image-viewer-modal');
     let notice;
     // 느린 회선에서는 상세가 오기까지 몇 초씩 걸린다. 그동안 아무 반응이
     // 없으면 눌리지 않은 줄 알고 다시 누르게 되므로 불러오는 중임을 알린다.
     showNoticeLoading();
     try {
-        notice = await getNoticeDetail(currentViewId);
+        notice = await getNoticeDetail(requestedId);
     } catch (error) {
+        if (requestVersion !== noticeDetailRequestVersion || currentViewId !== requestedId) return;
         console.error('공지 상세 불러오기 실패:', error);
-        hideNoticeLoading();
         alert('공지 상세를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
         return;
     } finally {
-        hideNoticeLoading();
+        if (requestVersion === noticeDetailRequestVersion) hideNoticeLoading();
     }
+    if (requestVersion !== noticeDetailRequestVersion || currentViewId !== requestedId) return;
 
     notice.views = (notice.views || 0) + 1;
     const datePresentation = getNoticeDatePresentation(notice);
@@ -2909,14 +2988,13 @@ async function openDetail(idStr) {
     sourceArea.hidden = !notice.sourceUrl && attachments.length === 0;
 
     // 상세 상단 자체가 사진 넘김이 가능한 갤러리이고, 아래 썸네일로도 바로 이동한다.
+    resetNoticeImage('detail');
     const hero = document.getElementById('detail-hero');
-    const heroImg = document.getElementById('detail-hero-img');
     const gallery = document.getElementById('detail-gallery');
     gallery.innerHTML = '';
     if (notice.images && notice.images.length > 0) {
         detailImageArray = [...notice.images];
         detailImageIndex = 0;
-        heroImg.style.cursor = 'zoom-in';
         hero.hidden = false;
         if (notice.images.length > 1) {
             notice.images.forEach((src, idx) => {
@@ -2961,6 +3039,11 @@ function showDetailView() {
 }
 
 function showBoardView() {
+    noticeDetailRequestVersion += 1;
+    hideNoticeLoading();
+    resetNoticeImage('detail');
+    closeModal('image-viewer-modal');
+    imageSwipeStartX = null;
     const board = document.getElementById('board-view');
     const detail = document.getElementById('notice-detail-view');
     runNoticeSurfaceTransition(() => {
