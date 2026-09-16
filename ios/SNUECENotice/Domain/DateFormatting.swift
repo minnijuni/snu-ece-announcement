@@ -74,6 +74,14 @@ enum DateFormatting {
         return String(format: "%04d.%02d.%02d(%@)", year, month, day, weekday)
     }
 
+    /// "08.01(토)". 연도를 뗀 표기. 목록 카드처럼 한 줄에 기간을 다 적어야 하는 좁은 자리에 쓴다.
+    static func shortDayWithWeekday(_ value: String?) -> String {
+        guard let date = parseDay(value) else { return value?.trimmed ?? "" }
+        let components = calendar.dateComponents([.month, .day, .weekday], from: date)
+        let weekday = weekdaySymbols[max(0, (components.weekday ?? 1) - 1)]
+        return String(format: "%02d.%02d(%@)", components.month ?? 1, components.day ?? 1, weekday)
+    }
+
     /// 푸터 동기화 배지의 "2026.08.04 09:30".
     static func syncTimestamp(_ date: Date) -> String {
         let components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)

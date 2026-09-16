@@ -65,7 +65,7 @@ xcodebuild test -project SNUECENotice.xcodeproj -scheme SNUECENotice -sdk iphone
 | `createNoticeRepository()` | `Networking/NoticeService` + `BoardViewModel` |
 | `.rail-left` 서랍 | `Features/Drawer/SideDrawerView` |
 | `renderRightRailAd()` | `Features/Banner/BannerCarouselView` |
-| `refreshFooterSyncStatus()` | `SyncState` + `SyncStatusBadge` |
+| `refreshFooterSyncStatus()` | `SyncState` + 푸터의 "업데이트" 한 줄 |
 | `js/tutorial.js` 스포트라이트 안내 | `Features/Board/UserGuideView` (아래 참고) |
 | `renderDetailDates()` | `NoticeDatePresentation.detailDateRows` + 상세의 날짜 상자 |
 | `initializeBetaAnalytics()`, `recordBetaNoticeOpen()` | `Features/Analytics/BetaAnalytics` |
@@ -108,11 +108,15 @@ iOS답게 바꾼 것:
 웹은 브라우저 **Web Push(VAPID)** 로 서버가 알림을 밀어 줍니다. iOS 앱은 그 규격을 쓸 수 없고,
 현재 백엔드에는 APNs 발송 경로가 없습니다. 그래서 이 앱의 알림 설정은:
 
-- 웹과 같은 항목(대상 학번·관심 카테고리·마감 임박 포함·마감 N일 전)을 그대로 받고,
-- 설정을 **기기에 저장**한 뒤,
+- 앞에는 새 공지 등록 알림 켜기/끄기와 마감 알림(없음·1·3·7일 전) 둘만 두고,
+  웹과 같은 나머지 항목(대상 학번·관심 카테고리·마감 임박 포함)은 고급 설정으로 접어 받고,
+- '설정 저장'을 눌렀을 때만 **기기에 저장**하고('취소'는 직전 설정으로 되돌린 뒤 닫는다),
 - 목록에 실린 공지 가운데 설정에 맞는 것의 마감 알림을 **기기 안에서 예약**합니다(아침 9시).
 
 즉 앱을 한 번은 열어야 예약이 갱신되고, 새 공지가 올라온 즉시 오는 알림은 아직 없습니다.
+대신 백그라운드에 있다가 돌아오면 보고 있던 목록을 조용히 다시 받습니다(`RootView`의
+`scenePhase` → `BoardViewModel.refreshAfterForeground()`). 앱을 켜 둔 사이에 관리자가 올린
+공지는 돌아오는 순간 목록에 실리고, 마감 알림 예약도 그 목록으로 다시 세워집니다.
 서버에 APNs 엔드포인트(기기 토큰 등록 + 발송)가 생기면
 `Features/Notifications/NotificationPreferences.swift`에 토큰 등록을 더하면 됩니다.
 

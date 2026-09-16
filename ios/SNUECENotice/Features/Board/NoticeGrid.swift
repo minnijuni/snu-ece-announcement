@@ -2,9 +2,9 @@ import SwiftUI
 
 /// 카드 두 열.
 ///
-/// 두 열이 나란히 끝나면 아래에 빈 띠가 남는다. 왼쪽 열을 정렬 버튼 줄
-/// 높이까지 끌어올려 벽돌처럼 어긋나게 두면 그 자리가 메워진다. 정렬 버튼은
-/// 오른쪽에 몰려 있어 그 왼쪽은 비어 있기 때문이다.
+/// 두 열이 나란히 끝나면 아래에 빈 띠가 남는다. 왼쪽 열을 정렬 칸 높이까지
+/// 끌어올려 벽돌처럼 어긋나게 두면 그 자리가 메워진다. 정렬 칸은 오른쪽
+/// 열 위 칸만 차지하므로 왼쪽 열 위 칸이 비어 있기 때문이다(웹 `margin-top: -46px`).
 /// 검색·필터를 걸면 그 자리에 "결과 N건"이 들어서므로 끌어올리기를 멈춘다.
 struct NoticeGrid: View {
     let notices: [Notice]
@@ -13,14 +13,16 @@ struct NoticeGrid: View {
     let thumbnailURL: (Notice) -> URL?
     let onSelect: (Notice) -> Void
 
-    /// 왼쪽 열을 끌어올리는 높이. 웹 `margin-top: -46px`와 같다.
-    private static let staggerOffset: CGFloat = -46
+    /// 왼쪽 열을 끌어올리는 높이. 정렬 칸 높이에 카드와 정렬 칸 사이 간격을
+    /// 더한 만큼이라, 올라온 카드의 머리가 정렬 칸의 머리와 나란히 선다.
+    private static var staggerOffset: CGFloat {
+        -(ResultsToolbar.slotHeight + Theme.Metrics.gridSpacing)
+    }
 
-    /// 투어가 짚는 카드. 첫 카드는 목록을 맨 위로 굴렸을 때 위에 뜨는
-    /// 검색줄에 머리가 눌려 잘려 보이므로, 한 행 아래(왼쪽 열 둘째 카드)를
-    /// 짚는다. 카드가 그만큼 없으면 첫 카드로 물러난다.
+    /// 투어가 짚는 카드. 첫 카드다 — 투어 중에는 위에 뜨는 검색줄을 감추므로
+    /// 머리가 가려질 일이 없다.
     private var tutorialCardID: Notice.ID? {
-        (notices.count > 2 ? notices[2] : notices.first)?.id
+        notices.first?.id
     }
 
     private var columns: (left: [Notice], right: [Notice]) {

@@ -48,8 +48,8 @@ final class BoardViewModel: ObservableObject {
 
     /// "결과 N건"을 보일지. 조건을 하나도 걸지 않은 기본 목록에서는
     /// 전체 건수를 다시 알려줄 필요가 없다. 카테고리(메뉴)만 고른 목록도
-    /// 숨긴다 — 건수 줄이 서면 두 열이 같은 높이에서 시작해 어긋남이 사라지고,
-    /// 몇 번째 공지인지 눈으로 따라가기 어려워진다.
+    /// 숨긴다 — 건수 줄이 서면 왼쪽 열이 정렬 칸 옆으로 올라오지 못해
+    /// 벽돌 배치가 풀리고, 탭을 옮길 때마다 줄이 들썩인다.
     var showsResultCount: Bool {
         pagination.total > 0
             && (!filters.searchText.trimmed.isEmpty || filters.hasDetailedFilters)
@@ -80,15 +80,20 @@ final class BoardViewModel: ObservableObject {
         if let status = await sync {
             syncState = .from(status)
         } else {
-            syncState = .loadFailed
+            syncState = .failed
         }
     }
 
     /// 조건이 바뀌었을 때 목록을 다시 받는다. 첫 쪽부터 새로 센다.
-    func reload(page: Int = 1) async {
+    ///
+    /// `quietly`면 불러오는 중 표시를 켜지 않는다. 보고 있던 목록을 그대로 둔 채
+    /// 뒤에서 바꿔 끼우는 새로고침(상징 탭)에 쓴다. 끝날 때는 조용한 쪽도
+    /// 표시를 끈다 — 앞서 시끄럽게 시작한 요청을 이 요청이 밀어냈다면 그쪽은
+    /// 끌 기회를 잃기 때문이다.
+    func reload(page: Int = 1, quietly: Bool = false) async {
         requestVersion += 1
         let version = requestVersion
-        isLoading = true
+        if !quietly { isLoading = true }
         loadError = nil
 
         defer {
@@ -134,6 +139,22 @@ final class BoardViewModel: ObservableObject {
 
     func refresh() async {
         await reload(page: max(1, pagination.page))
+        await loadMetadata()
+    }
+
+    /// 백그라운드에 있다가 돌아왔을 때. 그동안 관리자가 올린 공지를 받으러
+    /// 보고 있던 쪽을 조용히 다시 받는다. 앱을 켜 둔 채로는 새 공지가 영영
+    /// 나타나지 않던 것을 여기서 메운다. 컨트롤 센터·알림 배너처럼 잠깐
+    /// 가려진 경우는 여기로 오지 않는다 — `RootView`가 background를 거친
+    /// 복귀만 부른다.
+    ///
+    /// 첫 화면이나 사용자가 건 새로고침이 아직 오는 중이면 끼어들지 않는다.
+    /// `reload()`는 늦게 온 응답을 버리므로 여기서 겹쳐 부르면 그 요청이
+    /// 헛수고가 된다. 보고 있던 목록이 있으면 그대로 둔 채 뒤에서 바꿔 끼우고,
+    /// 아무것도 없으면(오프라인 콜드 스타트) 불러오는 중 표시를 켠다.
+    func refreshAfterForeground() async {
+        guard hasLoadedOnce, !isLoading else { return }
+        await reload(page: max(1, pagination.page), quietly: !notices.isEmpty)
         await loadMetadata()
     }
 
@@ -202,13 +223,13 @@ final class BoardViewModel: ObservableObject {
         Task { await reload(page: 1) }
     }
 
-    /// 엠블럼을 눌렀을 때. 조건을 모두 지우고 첫 화면으로 되돌린다.
+    /// 엠블럼을 눌렀을 때. 조건을 모두 지우고 첫 화면 목록을 조용히 다시 받는다.
     func resetToHome() {
         searchTask?.cancel()
         filters = NoticeFilters()
         selectedCategorySlug = "all"
         Task {
-            await reload(page: 1)
+            await reload(page: 1, quietly: true)
             await loadMetadata()
         }
     }

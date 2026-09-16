@@ -141,11 +141,21 @@ struct TutorialOverlayView: View {
     let onNext: () -> Void
     let onSkip: () -> Void
     let onOpenDoc: () -> Void
+    /// 설명 카드의 높이가 정해질 때마다 알린다. 목록이 그만큼 끝에 여백을 둔다.
+    var onCardHeightChange: (CGFloat) -> Void = { _ in }
 
     private static let corner: CGFloat = 14
+    /// 카드 위쪽과 표적 사이에 남길 최소 숨.
     private static let cardGap: CGFloat = 14
     private static let edge: CGFloat = 12
-    private static let move = Animation.easeInOut(duration: 0.35)
+    /// 구멍이 옮겨 가고 카드가 자라는 속도. 목록을 굴리는 쪽도 같은 값을 써서
+    /// 구멍·목록·카드가 한 박자로 움직인다.
+    static let move = Animation.easeInOut(duration: 0.35)
+
+    /// 투어 동안 목록 끝에 둘 여백. 카드 높이에 카드 아래 여백과 표적과의 숨을 더한 값이다.
+    static func reservedBottomSpace(cardHeight: CGFloat) -> CGFloat {
+        cardHeight + edge + cardGap
+    }
 
     private var steps: [TutorialStep] { TutorialStep.all }
     private var step: TutorialStep { steps[min(index, steps.count - 1)] }
@@ -173,7 +183,7 @@ struct TutorialOverlayView: View {
                         .allowsHitTesting(false)
                 }
 
-                card(in: proxy, hole: hole)
+                card(in: proxy)
             }
         }
         /* 안전 영역 무시는 GeometryReader 바깥에 건다. 안쪽 ZStack에 걸면
@@ -197,26 +207,22 @@ struct TutorialOverlayView: View {
         CGRect(x: proxy.size.width / 2, y: proxy.size.height / 2, width: 0, height: 0)
     }
 
-    /// 설명 카드. 짚는 자리가 화면 위쪽이면 아래에, 아래쪽이면 위에 선다.
-    /// 마지막 단계는 한가운데.
-    @ViewBuilder
-    private func card(in proxy: GeometryProxy, hole: CGRect?) -> some View {
-        let placeBottom = (hole?.midY ?? 0) < proxy.size.height / 2
-        let alignment: Alignment = hole == nil ? .center : (placeBottom ? .bottom : .top)
-        let topInset = hole.map { $0.maxY + Self.cardGap } ?? 0
-        let bottomInset = hole.map { proxy.size.height - $0.minY + Self.cardGap } ?? 0
-
+    /// 설명 카드. 단계와 상관없이 언제나 화면 아래에 같은 자리로 붙는다.
+    ///
+    /// 예전에는 표적이 위쪽이면 아래, 아래쪽이면 위로 자리를 바꿨는데, 그러면
+    /// 단계마다 '다음' 버튼이 딴 데로 가 손이 헤매고, 자리가 표적 좌표에 묶여
+    /// 있어 목록이 굴러 표적이 옮겨 앉을 때마다 카드가 툭 튀었다. 아래에
+    /// 못 박으면 '다음'은 늘 같은 자리고, 문구 길이에 따라 카드 윗변만 오르내린다.
+    /// 표적은 목록을 굴려 카드 위쪽으로 끌어올린다(`BoardView.scrollTutorialTarget`).
+    private func card(in proxy: GeometryProxy) -> some View {
         VStack(spacing: 0) { cardBody }
             .frame(maxWidth: 420)
             .padding(.horizontal, Self.edge)
-            .padding(.top, alignment == .top && hole != nil
-                     ? max(Self.edge, proxy.safeAreaInsets.top + Self.edge)
-                     : (alignment == .bottom ? 0 : Self.edge))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
-            .padding(.top, alignment == .bottom && hole != nil ? min(topInset, proxy.size.height * 0.55) : 0)
-            .padding(.bottom, alignment == .top && hole != nil
-                     ? min(bottomInset, proxy.size.height * 0.55)
-                     : proxy.safeAreaInsets.bottom + Self.edge)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                onCardHeightChange(height)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.bottom, proxy.safeAreaInsets.bottom + Self.edge)
             .animation(Self.move, value: index)
     }
 

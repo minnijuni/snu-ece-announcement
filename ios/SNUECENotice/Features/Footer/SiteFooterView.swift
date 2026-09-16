@@ -2,9 +2,9 @@ import SwiftUI
 
 /// 목록 맨 아래 푸터.
 ///
-/// 폰에서는 서랍이 접혀 있어 푸터가 사실상 주 내비게이션이 된다. 그래서
-/// 데스크톱과 반대로 링크를 더 크고 진하게 키우고, 수집 신선도를 맨 위 배지로
-/// 올린다. 순서는 동기화 → 링크 → 법적 고지다.
+/// 폰에서는 서랍이 접혀 있어 푸터가 사실상 주 내비게이션이 된다. 다만 본문
+/// 카드보다 눈에 띄어서는 안 되므로 글자는 카드의 메타 정보만큼 작게 둔다.
+/// 순서는 업데이트 시각 → 링크 → 법적 고지다.
 struct SiteFooterView: View {
     let syncState: SyncState
 
@@ -13,9 +13,9 @@ struct SiteFooterView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SyncStatusBadge(state: syncState)
+            updatedLine
                 .tutorialTarget(.footerSync)
-                .padding(.bottom, 12)
+                .padding(.bottom, 10)
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -58,6 +58,18 @@ struct SiteFooterView: View {
         .padding(.top, 26)
     }
 
+    /// 마지막으로 학부 홈페이지에서 공지를 가져온 시각. 상태 상자 대신
+    /// 작고 옅은 한 줄로만 적는다.
+    private var updatedLine: some View {
+        Text(syncState.updatedLabel)
+            .font(Theme.Typography.sans(10.5))
+            .foregroundStyle(Theme.Palette.footerText)
+            .monospacedDigit()
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("공지 \(syncState.updatedLabel)")
+    }
+
     private var legal: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("본 서비스는 학생이 운영하는 비공식 통합 안내 페이지입니다. 공지 원문과 운영 기관의 안내를 최종 기준으로 합니다.")
@@ -83,21 +95,21 @@ struct SiteFooterView: View {
     private func column(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
-                .font(Theme.Typography.sans(12, .bold))
+                .font(Theme.Typography.sans(11, .bold))
                 .foregroundStyle(Theme.Palette.textSub)
-                .padding(.bottom, 4)
+                .padding(.bottom, 3)
             content()
         }
         .padding(.vertical, 4)
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
     }
 
     private func footerButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(Theme.Typography.sans(14, .semibold))
+                .font(Theme.Typography.sans(12.5, .semibold))
                 .foregroundStyle(Theme.Palette.textMain)
-                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.99))
@@ -115,80 +127,18 @@ struct SiteFooterView: View {
         Button {
             if let target = URL(string: url) { openURL(target) }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 Text(title)
-                    .font(Theme.Typography.sans(14, .semibold))
+                    .font(Theme.Typography.sans(12.5, .semibold))
                 Image(systemName: "arrow.up.right.square")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 10, weight: .bold))
                     .opacity(0.7)
             }
             .foregroundStyle(Theme.Palette.textMain)
-            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle(scale: 0.99))
         .accessibilityLabel("\(title) (새 창)")
-    }
-}
-
-/// 수집 신선도 배지. 색만으로 상태를 구분하지 않고 문구와 아이콘도 함께 바뀐다.
-struct SyncStatusBadge: View {
-    let state: SyncState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .bold))
-                Text(state.label)
-                    .font(Theme.Typography.sans(12.5, .heavy))
-            }
-            if !state.detail.isEmpty {
-                Text(state.detail)
-                    .font(Theme.Typography.sans(11.5))
-                    .opacity(0.85)
-                    .monospacedDigit()
-            }
-        }
-        .foregroundStyle(foreground)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(background)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(foreground.opacity(0.22), lineWidth: 1)
-                )
-        )
-        .accessibilityElement(children: .combine)
-    }
-
-    private var icon: String {
-        switch state {
-        case .loading: "arrow.triangle.2.circlepath"
-        case .ok: "arrow.triangle.2.circlepath"
-        case .stale: "clock"
-        case .failed: "exclamationmark.triangle"
-        }
-    }
-
-    private var foreground: Color {
-        switch state {
-        case .loading: Theme.Palette.footerLink
-        case .ok: Theme.Palette.ok
-        case .stale: Theme.Palette.warning
-        case .failed: Theme.Palette.danger
-        }
-    }
-
-    private var background: Color {
-        switch state {
-        case .loading: Color(hex: 0xF4F6F9)
-        case .ok: Theme.Palette.okBackground
-        case .stale: Theme.Palette.warningBackground
-        case .failed: Theme.Palette.dangerBackground
-        }
     }
 }

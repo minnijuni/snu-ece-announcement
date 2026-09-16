@@ -25,7 +25,7 @@ final class NoticeDecodingTests: XCTestCase {
         XCTAssertEqual(notice.targetBadge, "24학번 외 1")
         XCTAssertTrue(notice.isPinned)
         XCTAssertEqual(notice.rewardText, "기프티콘 증정")
-        XCTAssertEqual(notice.excerpt, "첫 줄 둘째 줄")
+        XCTAssertEqual(notice.aiSummary, ["첫 줄", "둘째 줄"])
         XCTAssertEqual(notice.categoryIds, [1, 2])
         XCTAssertTrue(notice.showsPoster)
         XCTAssertFalse(notice.isDetailLoaded)
@@ -116,14 +116,16 @@ final class NoticeDecodingTests: XCTestCase {
 
     // MARK: - 동기화 상태
 
-    func testSyncStateTurnsStaleAfterSixHours() {
-        let now = DateFormatting.parseTimestamp("2026-08-04T12:00:00Z")!
-        let fresh = SyncStatus(lastSyncedAt: now.addingTimeInterval(-3600), noticeCount: 10)
-        let old = SyncStatus(lastSyncedAt: now.addingTimeInterval(-7 * 3600), noticeCount: 10)
+    /// 푸터는 상태 상자 없이 "YYYY.MM.DD HH:mm 업데이트" 한 줄만 적는다.
+    /// 수집 기록이 없으면 그 사실만 옅게 알린다.
+    func testSyncStateWritesUpdatedTimestamp() {
+        let stamp = DateFormatting.parseTimestamp("2026-08-04T12:00:00Z")!
+        let synced = SyncState.from(SyncStatus(lastSyncedAt: stamp, noticeCount: 10))
 
-        XCTAssertEqual(SyncState.from(fresh, now: now).label, "최신 상태")
-        XCTAssertEqual(SyncState.from(old, now: now).label, "동기화 지연")
-        XCTAssertEqual(SyncState.from(SyncStatus(lastSyncedAt: nil, noticeCount: 0), now: now).label, "동기화 실패")
+        XCTAssertEqual(synced, .synced(stamp))
+        XCTAssertEqual(synced.updatedLabel, "\(DateFormatting.syncTimestamp(stamp)) 업데이트")
+        XCTAssertEqual(SyncState.from(SyncStatus(lastSyncedAt: nil, noticeCount: 0)), .failed)
+        XCTAssertEqual(SyncState.failed.updatedLabel, "업데이트 시각을 확인하지 못했습니다")
     }
 
     // MARK: - 배너

@@ -28,11 +28,23 @@ struct NoticeDatePresentation: Equatable {
 
     var badgeText: String
     var badgeStyle: BadgeStyle
-    var dateLabel: String
+    /// 적을 날짜들(`YYYY-MM-DD`). 비어 있으면 날짜를 쓰지 않고, 하나면 그날만,
+    /// 둘이면 `시작 ~ 끝`으로 잇는다.
+    var days: [String]
+
+    /// "2026.08.01(토) ~ 2026.08.09(일)". 상세 화면처럼 폭이 넉넉한 곳에 쓴다.
+    var dateLabel: String {
+        days.map { DateFormatting.dayWithWeekday($0) }.joined(separator: " ~ ")
+    }
+
+    /// "08.01(토) ~ 08.09(일)". 두 열짜리 카드는 좁아 연도를 뗀다.
+    var compactDateLabel: String {
+        days.map { DateFormatting.shortDayWithWeekday($0) }.joined(separator: " ~ ")
+    }
 
     static func make(for notice: Notice, now: Date = Date()) -> NoticeDatePresentation {
         if notice.isAlwaysOpen {
-            return NoticeDatePresentation(badgeText: "상시", badgeStyle: .none, dateLabel: "")
+            return NoticeDatePresentation(badgeText: "상시", badgeStyle: .none, days: [])
         }
 
         let deadline = DateFormatting.dayKey(notice.deadlineAt) ?? DateFormatting.dayKey(notice.deadline)
@@ -41,11 +53,7 @@ struct NoticeDatePresentation: Equatable {
 
         guard let deadline else {
             // 마감이 없으면 행사가 열리는 날 하나만 알린다.
-            return NoticeDatePresentation(
-                badgeText: "",
-                badgeStyle: .none,
-                dateLabel: start.map(DateFormatting.dayWithWeekday) ?? ""
-            )
+            return NoticeDatePresentation(badgeText: "", badgeStyle: .none, days: start.map { [$0] } ?? [])
         }
 
         let dDay = DDay.calculate(deadline: deadline, now: now)
@@ -54,14 +62,9 @@ struct NoticeDatePresentation: Equatable {
 
         // 시작이 마감보다 뒤면 잘못 들어온 값이다. 그럴 때는 마감만 적는다.
         guard let from, from < deadline else {
-            return NoticeDatePresentation(badgeText: dDay.text, badgeStyle: style,
-                                          dateLabel: DateFormatting.dayWithWeekday(deadline))
+            return NoticeDatePresentation(badgeText: dDay.text, badgeStyle: style, days: [deadline])
         }
-        return NoticeDatePresentation(
-            badgeText: dDay.text,
-            badgeStyle: style,
-            dateLabel: "\(DateFormatting.dayWithWeekday(from)) ~ \(DateFormatting.dayWithWeekday(deadline))"
-        )
+        return NoticeDatePresentation(badgeText: dDay.text, badgeStyle: style, days: [from, deadline])
     }
 
     static func registeredOn(_ notice: Notice) -> String? {
@@ -97,10 +100,5 @@ extension Notice {
         let labels = targets.map(\.trimmed).filter { !$0.isEmpty }
         guard let first = labels.first else { return target.trimmed.nilIfEmpty ?? "전체" }
         return labels.count > 1 ? "\(first) 외 \(labels.count - 1)" : first
-    }
-
-    /// 카드 본문 발췌. 목록 응답에는 원문이 없으므로 AI 3줄 요약을 쓴다.
-    var excerpt: String {
-        aiSummary.joined(separator: " ")
     }
 }

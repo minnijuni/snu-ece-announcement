@@ -20,6 +20,9 @@ struct BoardView: View {
     @State private var tutorialIndex: Int?
     /// 투어가 빠른 조건 줄을 보여 주려고 필터를 대신 펼쳤는지. 끝나면 되돌린다.
     @State private var tutorialExpandedFilters = false
+    /// 투어 설명 카드의 높이. 투어 동안 목록 끝에 이만큼 여백을 둬서 푸터처럼
+    /// 맨 끝에 있는 표적도 카드 위로 끌어올릴 수 있게 한다.
+    @State private var tutorialCardHeight: CGFloat = 0
 
     private static let searchAnchor = "notice-search"
     private static let categoryAnchor = "tutorial-categories"
@@ -49,6 +52,9 @@ struct BoardView: View {
                     searchSection(scroller)
                         .id(Self.searchAnchor)
 
+                    // 상세 필터 묶음 아래 12pt를 띄우고 정렬 칸이 선다. 왼쪽 열 첫
+                    // 카드는 정렬 칸 높이까지 올라와 옆에 서므로, 이 12pt가 곧
+                    // 필터 판과 카드 사이의 숨이다.
                     ResultsToolbar(
                         total: board.pagination.total,
                         showsCount: board.showsResultCount,
@@ -56,7 +62,7 @@ struct BoardView: View {
                         onSelectSort: { board.setSort($0) }
                     )
                     .id(Self.sortAnchor)
-                    .padding(.vertical, 4)
+                    .padding(.top, 12)
 
                     NoticeGrid(
                         notices: board.notices,
@@ -67,7 +73,7 @@ struct BoardView: View {
                         onSelect: { router.openNotice(id: $0.id) }
                     )
                     .id(Self.gridAnchor)
-                    .padding(.top, 2)
+                    .padding(.top, Theme.Metrics.gridSpacing)
 
                     emptyOrError
 
@@ -91,6 +97,14 @@ struct BoardView: View {
 
                     SiteFooterView(syncState: board.syncState)
                         .id(Self.footerAnchor)
+
+                    // 투어 동안만 목록 끝에 설명 카드 높이만큼 빈자리를 둔다. 카드는
+                    // 화면 아래에 붙박이라, 이 여백이 없으면 푸터를 카드 위로
+                    // 끌어올릴 수 없어 구멍이 카드에 가려진다.
+                    if tutorialIndex != nil {
+                        Color.clear
+                            .frame(height: TutorialOverlayView.reservedBottomSpace(cardHeight: tutorialCardHeight))
+                    }
                 }
                 .padding(.horizontal, Theme.Metrics.pagePadding)
                 // 본문 폭을 스크롤 영역 폭에 못박는다. 안쪽 어느 한 조각이
@@ -133,6 +147,10 @@ struct BoardView: View {
             //   xcrun simctl launch <udid> kr.ac.notice.ece.snu -tutorialStep 3
             // (`-키 값` 꼴 인자는 UserDefaults 인자 도메인으로 들어온다.)
             .onAppear {
+                // `-expandFilters 1`: 상세 필터를 펼친 채로 띄운다. 간격·펼침 배치를 볼 때 쓴다.
+                if UserDefaults.standard.bool(forKey: "expandFilters") {
+                    isFilterExpanded = true
+                }
                 guard let raw = UserDefaults.standard.string(forKey: "tutorialStep"),
                       let step = Int(raw) else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
@@ -151,7 +169,8 @@ struct BoardView: View {
                         onOpenDoc: {
                             endTutorial()
                             router.present(.userGuide)
-                        }
+                        },
+                        onCardHeightChange: { tutorialCardHeight = $0 }
                     )
                 }
             }
@@ -185,29 +204,32 @@ struct BoardView: View {
             withAnimation(.easeOut(duration: 0.2)) { menuHandleVisible = true }
         }
 
-        withAnimation(.easeInOut(duration: 0.35)) {
+        withAnimation(TutorialOverlayView.move) {
             tutorialIndex = newIndex
             scrollTutorialTarget(step, scroller)
         }
     }
 
+    /// 설명 카드는 언제나 화면 아래에 붙어 있으므로, 표적은 모두 화면 위쪽
+    /// 절반으로 끌어올린다. 그래야 구멍이 카드에 가려지지 않는다.
     private func scrollTutorialTarget(_ step: TutorialStep, _ scroller: ScrollViewProxy) {
         switch step.target {
         case .searchField, .guideButton, .quickFilters, .filterToggle:
             scroller.scrollTo(Self.searchAnchor, anchor: .top)
         case .categoryTabs:
-            scroller.scrollTo(Self.categoryAnchor, anchor: .center)
+            scroller.scrollTo(Self.categoryAnchor, anchor: .top)
         case .sortChips:
-            // 가운데 두면 설명 카드가 위로 밀려 천장에 붙는다. 정렬 줄을
-            // 화면 위쪽 1/4에 세워 카드가 아래쪽에 넉넉히 앉게 한다.
-            scroller.scrollTo(Self.sortAnchor, anchor: UnitPoint(x: 0.5, y: 0.25))
+            scroller.scrollTo(Self.sortAnchor, anchor: UnitPoint(x: 0.5, y: 0.2))
         case .noticeCard:
-            scroller.scrollTo(Self.gridAnchor, anchor: .top)
+            // 첫 카드는 정렬 칸과 머리를 나란히 하므로 정렬 줄을 기준으로 굴린다.
+            // 목록 전체(수천 pt)를 기준 삼으면 비율 앵커가 크게 어긋나 카드
+            // 머리가 화면 위로 잘린다. 꼭대기에서 한 뼘만 내려 세운다.
+            scroller.scrollTo(Self.sortAnchor, anchor: UnitPoint(x: 0.5, y: 0.03))
         case .banner:
-            scroller.scrollTo(Self.bannerAnchor, anchor: .center)
-        case .footerLinks:
-            scroller.scrollTo(Self.footerAnchor, anchor: .center)
-        case .footerSync:
+            scroller.scrollTo(Self.bannerAnchor, anchor: UnitPoint(x: 0.5, y: 0.3))
+        case .footerLinks, .footerSync:
+            // 푸터는 목록 끝이라 원래는 위로 올라오지 못한다. 투어 동안 목록 끝에
+            // 둔 여백(`reservedBottomSpace`) 덕분에 꼭대기까지 끌어올릴 수 있다.
             scroller.scrollTo(Self.footerAnchor, anchor: .top)
         case .menuHandle, nil:
             break // 화면에 붙박인 것과 마지막 인사는 굴릴 곳이 없다.
@@ -240,32 +262,41 @@ struct BoardView: View {
                 isExpanded: isFilterExpanded,
                 chips: board.filters.activeChips,
                 onToggle: {
-                    withAnimation(.easeOut(duration: 0.22)) { isFilterExpanded.toggle() }
+                    withAnimation(.easeOut(duration: 0.26)) { isFilterExpanded.toggle() }
                 },
                 onRemoveChip: { board.clearChip($0) }
             )
             .tutorialTarget(.filterToggle)
             .padding(.top, 8)
 
-            if isFilterExpanded {
-                QuickFiltersRow(
-                    isOn: { board.filters.isOn($0) },
-                    onToggle: { board.toggleQuickFilter($0) }
-                )
-                .tutorialTarget(.quickFilters)
-                .padding(.top, 5)
-                .transition(.move(edge: .top).combined(with: .opacity))
+            /* 펼침 내용은 '상세 필터' 줄 바로 아래에서 풀려 나온다. 바깥 틀이
+               내용 높이만큼 자라는 동안 안쪽은 제 높이만큼 위에서 내려오고,
+               틀 밖으로 나간 부분은 잘라 낸다. 틀 없이 `.move(edge: .top)`만
+               걸면 판이 제 높이(수백 pt)만큼 위, 즉 화면 꼭대기 너머에서
+               떨어져 내려오는 것처럼 보였다. */
+            VStack(alignment: .leading, spacing: 0) {
+                if isFilterExpanded {
+                    VStack(alignment: .leading, spacing: 0) {
+                        QuickFiltersRow(
+                            isOn: { board.filters.isOn($0) },
+                            onToggle: { board.toggleQuickFilter($0) }
+                        )
+                        .tutorialTarget(.quickFilters)
+                        .padding(.top, 5)
 
-                FilterPanel(
-                    filters: board.filters,
-                    hosts: board.hosts,
-                    onApply: { board.applyFilters($0) },
-                    onReset: { board.resetDetailedFilters() },
-                    onClose: { withAnimation(.easeOut(duration: 0.22)) { isFilterExpanded = false } }
-                )
-                .padding(.top, 6)
-                .transition(.move(edge: .top).combined(with: .opacity))
+                        FilterPanel(
+                            filters: board.filters,
+                            hosts: board.hosts,
+                            onApply: { board.applyFilters($0) },
+                            onReset: { board.resetDetailedFilters() },
+                            onClose: { withAnimation(.easeOut(duration: 0.26)) { isFilterExpanded = false } }
+                        )
+                        .padding(.top, 6)
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .clipped()
         }
     }
 
@@ -344,9 +375,11 @@ struct BoardView: View {
     }
 
     /// 목록을 한참 내려가 진짜 검색창이 화면 밖으로 나가면 그때부터 대신 선다.
+    /// 투어 중에는 세우지 않는다 — 투어가 목록을 굴릴 때마다 따라 나와
+    /// 첫 카드 같은 표적의 머리를 덮는다.
     @ViewBuilder
     private var stickySearchBar: some View {
-        if searchFieldHidden {
+        if searchFieldHidden, tutorialIndex == nil {
             StickySearchBar { router.jumpToSearch() }
                 .transition(.move(edge: .top).combined(with: .opacity))
         }

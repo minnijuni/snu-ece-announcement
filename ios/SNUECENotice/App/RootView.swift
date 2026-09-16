@@ -10,8 +10,12 @@ struct RootView: View {
     @EnvironmentObject private var analytics: BetaAnalytics
     @EnvironmentObject private var notifications: NotificationPreferencesStore
     @StateObject private var router = AppRouter()
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var drawerDrag: CGFloat = 0
+    /// 백그라운드를 거쳤는지. 컨트롤 센터·알림 배너·앱 전환기처럼 `.inactive`만
+    /// 스치는 경우와 구분한다 — 그때마다 서버를 부르면 낭비다.
+    @State private var wasInBackground = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -71,6 +75,18 @@ struct RootView: View {
             }
         }
         .onOpenURL { router.handle(url: $0) }
+        #if DEBUG
+        // 시뮬레이터에서는 탭을 넣을 수 없어 시트를 열어 볼 길이 없다. 실행 인자로 연다:
+        //   xcrun simctl launch <udid> kr.ac.notice.ece.snu -presentSheet notifications
+        .onAppear {
+            switch UserDefaults.standard.string(forKey: "presentSheet") {
+            case "notifications": router.present(.notificationPreferences)
+            case "guide": router.present(.userGuide)
+            case "feedback": router.present(.feedback)
+            default: break
+            }
+        }
+        #endif
         .task {
             analytics.appLaunched()
             // 목록을 먼저 띄운다. 권한 물음은 사용자가 답할 때까지 멈춰
@@ -83,6 +99,20 @@ struct RootView: View {
         // 때만 예약하면 그 뒤 새로 받은 공지의 마감은 영영 잡히지 않는다.
         .onChange(of: board.notices) { _, notices in
             Task { await notifications.rescheduleReminders(for: notices) }
+        }
+        // 백그라운드에 있다가 돌아오면 그동안 올라온 공지를 받는다. 관리자가
+        // 등록한 공지는 서버에 바로 실리지만, 앱은 켜 둔 채로 다시 조회하지
+        // 않아 사용자가 당겨서 새로고침하기 전까지 보이지 않았다.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background:
+                wasInBackground = true
+            case .active where wasInBackground:
+                wasInBackground = false
+                Task { await board.refreshAfterForeground() }
+            default:
+                break
+            }
         }
     }
 

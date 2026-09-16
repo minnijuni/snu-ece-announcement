@@ -8,6 +8,8 @@ import SwiftUI
 /// 바닥으로 제목만큼(상한까지) 자란다. 제목은 포스터 안에 크게 쓴 카드라도 본문
 /// 첫 줄에 한 번 더 적는다 — 목록을 아래로 훑을 때 태그 다음에 제목을 놓쳐
 /// 버리지 않게 하려는 것이다.
+/// 본문 아래는 태그 → 제목 → 날짜 한 줄 → 리워드·조회수 순으로 자리가 정해져
+/// 있다. 본문 발췌는 싣지 않는다 — 원문과 요약은 상세 화면의 몫이다.
 struct NoticeCardView: View {
     let notice: Notice
     let thumbnailURL: URL?
@@ -116,25 +118,41 @@ struct NoticeCardView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if !presentation.dateLabel.isEmpty {
-                Text(presentation.dateLabel)
-                    .font(Theme.Typography.sans(10.5, .semibold))
-                    .foregroundStyle(Theme.Palette.textSub)
-                    .lineSpacing(2)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !notice.excerpt.isEmpty {
-                Text(notice.excerpt)
-                    .font(Theme.Typography.sans(10.5))
-                    .foregroundStyle(Theme.Palette.textMuted)
-                    .lineLimit(1)
-            }
+            dateRow
 
             meta
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 날짜 한 줄. 제목 바로 아래, 카드마다 같은 자리에 한 줄로만 선다.
+    ///
+    /// 카드는 미리보기라 본문(AI 요약)은 싣지 않는다. 두 열짜리 카드는 폭이
+    /// 좁아 연도를 뗀 짧은 표기를 쓰고, 그래도 넘치면 줄을 바꾸는 대신 글자를
+    /// 조금 줄인다. 기간도 마감도 없는 공지는 줄이 비지 않게 등록일을 세운다.
+    private var dateRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "calendar")
+                .font(.system(size: 9, weight: .semibold))
+            Text(cardDateText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .font(Theme.Typography.sans(10.5, .semibold))
+        .foregroundStyle(Theme.Palette.textSub)
+        .monospacedDigit()
+        .frame(height: 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var cardDateText: String {
+        let label = presentation.compactDateLabel
+        if !label.isEmpty { return label }
+        if let registered = NoticeDatePresentation.registeredOn(notice) {
+            return "등록 \(DateFormatting.shortDayWithWeekday(registered))"
+        }
+        return ""
     }
 
     private var tags: some View {
@@ -214,7 +232,7 @@ struct NoticeCardView: View {
     private var accessibilityText: String {
         var parts = [notice.title]
         if !presentation.badgeText.isEmpty { parts.append(presentation.badgeText) }
-        if !presentation.dateLabel.isEmpty { parts.append(presentation.dateLabel) }
+        if !cardDateText.isEmpty { parts.append(cardDateText) }
         parts.append("주관 \(notice.host)")
         parts.append("조회 \(notice.views)")
         return parts.joined(separator: ", ")

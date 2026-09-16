@@ -1,6 +1,6 @@
 import Foundation
 
-/// 푸터의 "마지막 동기화" 배지가 쓰는 값. `/api/sync-status` 응답.
+/// 푸터의 업데이트 시각이 쓰는 값. `/api/sync-status` 응답.
 struct SyncStatus: Decodable, Equatable {
     var lastSyncedAt: Date?
     var noticeCount: Int
@@ -20,40 +20,26 @@ struct SyncStatus: Decodable, Equatable {
     }
 }
 
-/// 배지가 띠는 세 상태. 색만이 아니라 문구와 아이콘도 함께 바뀐다.
+/// 푸터에 적는 수집 시각.
+///
+/// 예전에는 최신·지연·실패를 색 상자로 갈라 보였지만, 학생에게 쓸모 있는
+/// 정보는 '언제 가져온 공지인가' 하나다. 지금은 시각 한 줄만 옅게 적으므로
+/// 상태도 그만큼만 남긴다.
 enum SyncState: Equatable {
     case loading
-    case ok(label: String, detail: String)
-    case stale(label: String, detail: String)
-    case failed(label: String, detail: String)
+    case synced(Date)
+    case failed
 
-    /// 마지막 수집이 이 시간을 넘기면 "동기화 지연"으로 본다.
-    static let staleHours: Double = 6
-
-    var label: String {
+    /// 푸터 한 줄. "2026.08.21 09:30 업데이트".
+    var updatedLabel: String {
         switch self {
-        case .loading: "동기화 상태 확인 중"
-        case .ok(let label, _), .stale(let label, _), .failed(let label, _): label
+        case .loading: "업데이트 시각 확인 중"
+        case .synced(let date): "\(DateFormatting.syncTimestamp(date)) 업데이트"
+        case .failed: "업데이트 시각을 확인하지 못했습니다"
         }
     }
 
-    var detail: String {
-        switch self {
-        case .loading: ""
-        case .ok(_, let detail), .stale(_, let detail), .failed(_, let detail): detail
-        }
+    static func from(_ status: SyncStatus) -> SyncState {
+        status.lastSyncedAt.map(SyncState.synced) ?? .failed
     }
-
-    static func from(_ status: SyncStatus, now: Date = Date()) -> SyncState {
-        guard let stamp = status.lastSyncedAt else {
-            return .failed(label: "동기화 실패", detail: "최근 수집 기록을 찾지 못했습니다")
-        }
-        let hoursSince = now.timeIntervalSince(stamp) / 3600
-        let detail = "\(DateFormatting.syncTimestamp(stamp)) 동기화"
-        return hoursSince > staleHours
-            ? .stale(label: "동기화 지연", detail: detail)
-            : .ok(label: "최신 상태", detail: detail)
-    }
-
-    static let loadFailed = SyncState.failed(label: "동기화 실패", detail: "수집 상태를 불러오지 못했습니다")
 }
