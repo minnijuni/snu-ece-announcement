@@ -53,6 +53,8 @@ struct NoticeDetailView: View {
         // 내비게이션 바가 없으므로 본문이 상태 표시줄 아래로 흘러 들어간다.
         // 그 자리만 흰 판으로 덮어 시계와 글자가 겹치지 않게 한다.
         .overlay(alignment: .top) { StatusBarBackdrop() }
+        // 목록은 남색 띠 위라 흰 시계를 쓴다. 여기는 흰 판이니 검은 시계로 되돌린다.
+        .statusBarStyle(.darkContent)
         .task {
             await model.load(onViewCounted: applyViewCount)
             // 열람 수는 상세가 실제로 떠야 센다. 불러오기에 실패한 화면은 세지 않는다.

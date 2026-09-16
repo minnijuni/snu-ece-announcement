@@ -219,8 +219,11 @@ struct NoticeEmptyState: View {
 /// 시계·와이파이 표시와 글자가 겹친다. 그 띠만 페이지와 같은 색으로 덮는다.
 /// 높이는 창의 안전 영역에서 읽는다 — 노치가 있는 기기와 없는 기기가 다르다.
 struct StatusBarBackdrop: View {
+    /// 판의 색. 기본은 본문과 같은 흰색이고, 남색 띠가 있는 화면은 띠 색을 준다.
+    var color: Color = Theme.Palette.background
+
     var body: some View {
-        Theme.Palette.background
+        color
             .frame(height: Self.topInset)
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)

@@ -47,7 +47,9 @@ struct ImageViewerView: View {
                 }
             }
         }
-        .statusBarHidden()
+        // 앱 단위 상태 표시줄 설정(`StatusBarAppearance`)이라 `.statusBarHidden()`은 듣지 않는다.
+        .onAppear { StatusBarAppearance.setHidden(true) }
+        .onDisappear { StatusBarAppearance.setHidden(false) }
     }
 
     private var toolbar: some View {

@@ -92,9 +92,9 @@ struct StickySearchBar: View {
         .padding(.trailing, 12)
         .padding(.top, 8)
         .padding(.bottom, 10)
-        // 바탕만 상태 표시줄 자리까지 올려 덮고, 검색칸 자체는 안전 영역 안에
-        // 남긴다. 통째로 올리면 시계와 글자가 겹친다.
-        .background(.regularMaterial, ignoresSafeAreaEdges: .top)
+        // 상태 표시줄 자리는 남색 판(`StatusBarBackdrop`)이 맡으므로 바탕을
+        // 그 위까지 올리지 않는다. 올리면 흰 유리 위에 흰 시계가 서서 안 보인다.
+        .background(.regularMaterial)
         .overlay(alignment: .bottom) {
             Theme.Palette.primary.opacity(0.1).frame(height: 1)
         }

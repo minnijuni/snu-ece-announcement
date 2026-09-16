@@ -78,12 +78,17 @@ struct RootView: View {
         #if DEBUG
         // 시뮬레이터에서는 탭을 넣을 수 없어 시트를 열어 볼 길이 없다. 실행 인자로 연다:
         //   xcrun simctl launch <udid> kr.ac.notice.ece.snu -presentSheet notifications
+        // 상세도 같다 — 딥링크는 시뮬레이터가 "열까요?" 확인창을 띄워 넘어가지 못한다:
+        //   xcrun simctl launch <udid> kr.ac.notice.ece.snu -openNotice 92
         .onAppear {
             switch UserDefaults.standard.string(forKey: "presentSheet") {
             case "notifications": router.present(.notificationPreferences)
             case "guide": router.present(.userGuide)
             case "feedback": router.present(.feedback)
             default: break
+            }
+            if let id = UserDefaults.standard.string(forKey: "openNotice").flatMap(Int.init) {
+                router.openNotice(id: id)
             }
         }
         #endif

@@ -37,76 +37,78 @@ struct BoardView: View {
         ScrollViewReader { scroller in
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 0) {
+                    // 띠만 좌우 끝까지 닿고, 그 아래부터 본문 여백이 시작된다.
                     BoardHeaderView()
-                        .padding(.bottom, 10)
 
-                    CategoryTabsView(
-                        categories: board.orderedCategories,
-                        selectedSlug: board.selectedCategorySlug,
-                        onSelect: { board.selectCategory(slug: $0) }
-                    )
-                    .tutorialTarget(.categoryTabs)
-                    .id(Self.categoryAnchor)
-                    .padding(.bottom, 12)
-
-                    searchSection(scroller)
-                        .id(Self.searchAnchor)
-
-                    // 상세 필터 묶음 아래 12pt를 띄우고 정렬 칸이 선다. 왼쪽 열 첫
-                    // 카드는 정렬 칸 높이까지 올라와 옆에 서므로, 이 12pt가 곧
-                    // 필터 판과 카드 사이의 숨이다.
-                    ResultsToolbar(
-                        total: board.pagination.total,
-                        showsCount: board.showsResultCount,
-                        sort: board.filters.sort,
-                        onSelectSort: { board.setSort($0) }
-                    )
-                    .id(Self.sortAnchor)
-                    .padding(.top, 12)
-
-                    NoticeGrid(
-                        notices: board.notices,
-                        isLoading: board.isLoading && !board.hasLoadedOnce,
-                        // 결과 건수 줄이 서면 그 자리가 채워지므로 왼쪽 열을 끌어올리지 않는다.
-                        staggered: !board.showsResultCount,
-                        thumbnailURL: { board.service.thumbnailURL(for: $0) },
-                        onSelect: { router.openNotice(id: $0.id) }
-                    )
-                    .id(Self.gridAnchor)
-                    .padding(.top, Theme.Metrics.gridSpacing)
-
-                    emptyOrError
-
-                    if board.pagination.total > 0 {
-                        NoticePaginationView(
-                            pagination: board.pagination,
-                            isLoading: board.isLoading,
-                            onSelect: { page in
-                                Task {
-                                    await board.goToPage(page)
-                                    withAnimation { scroller.scrollTo(Self.searchAnchor, anchor: .top) }
-                                }
-                            }
+                    VStack(alignment: .leading, spacing: 0) {
+                        CategoryTabsView(
+                            categories: board.orderedCategories,
+                            selectedSlug: board.selectedCategorySlug,
+                            onSelect: { board.selectCategory(slug: $0) }
                         )
+                        .tutorialTarget(.categoryTabs)
+                        .id(Self.categoryAnchor)
+                        .padding(.bottom, 12)
+
+                        searchSection(scroller)
+                            .id(Self.searchAnchor)
+
+                        // 상세 필터 묶음 아래 12pt를 띄우고 정렬 칸이 선다. 왼쪽 열 첫
+                        // 카드는 정렬 칸 높이까지 올라와 옆에 서므로, 이 12pt가 곧
+                        // 필터 판과 카드 사이의 숨이다.
+                        ResultsToolbar(
+                            total: board.pagination.total,
+                            showsCount: board.showsResultCount,
+                            sort: board.filters.sort,
+                            onSelectSort: { board.setSort($0) }
+                        )
+                        .id(Self.sortAnchor)
+                        .padding(.top, 12)
+
+                        NoticeGrid(
+                            notices: board.notices,
+                            isLoading: board.isLoading && !board.hasLoadedOnce,
+                            // 결과 건수 줄이 서면 그 자리가 채워지므로 왼쪽 열을 끌어올리지 않는다.
+                            staggered: !board.showsResultCount,
+                            thumbnailURL: { board.service.thumbnailURL(for: $0) },
+                            onSelect: { router.openNotice(id: $0.id) }
+                        )
+                        .id(Self.gridAnchor)
+                        .padding(.top, Theme.Metrics.gridSpacing)
+
+                        emptyOrError
+
+                        if board.pagination.total > 0 {
+                            NoticePaginationView(
+                                pagination: board.pagination,
+                                isLoading: board.isLoading,
+                                onSelect: { page in
+                                    Task {
+                                        await board.goToPage(page)
+                                        withAnimation { scroller.scrollTo(Self.searchAnchor, anchor: .top) }
+                                    }
+                                }
+                            )
+                        }
+
+                        BannerCarouselView(slides: board.bannerSlides.displayableRightRail)
+                            .tutorialTarget(.banner)
+                            .id(Self.bannerAnchor)
+                            .padding(.vertical, 4)
+
+                        SiteFooterView(syncState: board.syncState)
+                            .id(Self.footerAnchor)
+
+                        // 투어 동안만 목록 끝에 설명 카드 높이만큼 빈자리를 둔다. 카드는
+                        // 화면 아래에 붙박이라, 이 여백이 없으면 푸터를 카드 위로
+                        // 끌어올릴 수 없어 구멍이 카드에 가려진다.
+                        if tutorialIndex != nil {
+                            Color.clear
+                                .frame(height: TutorialOverlayView.reservedBottomSpace(cardHeight: tutorialCardHeight))
+                        }
                     }
-
-                    BannerCarouselView(slides: board.bannerSlides.displayableRightRail)
-                        .tutorialTarget(.banner)
-                        .id(Self.bannerAnchor)
-                        .padding(.vertical, 4)
-
-                    SiteFooterView(syncState: board.syncState)
-                        .id(Self.footerAnchor)
-
-                    // 투어 동안만 목록 끝에 설명 카드 높이만큼 빈자리를 둔다. 카드는
-                    // 화면 아래에 붙박이라, 이 여백이 없으면 푸터를 카드 위로
-                    // 끌어올릴 수 없어 구멍이 카드에 가려진다.
-                    if tutorialIndex != nil {
-                        Color.clear
-                            .frame(height: TutorialOverlayView.reservedBottomSpace(cardHeight: tutorialCardHeight))
-                    }
+                    .padding(.horizontal, Theme.Metrics.pagePadding)
                 }
-                .padding(.horizontal, Theme.Metrics.pagePadding)
                 // 본문 폭을 스크롤 영역 폭에 못박는다. 안쪽 어느 한 조각이
                 // 제 몫보다 넓다고 보고해도 가로로 밀려나지 않는다 — 웹에서
                 // 칸마다 `minmax(0, 1fr)`과 `min-width: 0`으로 막아 둔 것과 같은 뜻이다.
@@ -128,11 +130,13 @@ struct BoardView: View {
             .onChange(of: router.scrollToSearchToken) { _, _ in
                 withAnimation { scroller.scrollTo(Self.searchAnchor, anchor: .top) }
             }
-            // 내비게이션 바를 감췄으므로 본문이 상태 표시줄 아래로 흘러 들어가
-            // 시계와 글자가 겹친다. 그 자리만 흰 판으로 덮어 둔다.
-            .overlay(alignment: .top) { StatusBarBackdrop() }
             .overlay(alignment: .top) { stickySearchBar }
             .overlay(alignment: .topLeading) { floatingMenuHandle }
+            // 내비게이션 바를 감췄으므로 본문이 상태 표시줄 아래로 흘러 들어가
+            // 시계와 글자가 겹친다. 그 자리를 제목 띠와 같은 남색 판으로 덮어,
+            // 맨 위에서는 띠와 한 장으로 붙고 내려간 뒤에도 남색 줄로 남는다.
+            // 검색 줄·손잡이보다 뒤에 얹어 그것들의 바탕이 이 자리를 덮지 못하게 한다.
+            .overlay(alignment: .top) { StatusBarBackdrop(color: Theme.Palette.railBackground) }
             .overlay(alignment: .center) {
                 if board.isLoading && board.hasLoadedOnce {
                     LoadingOverlay(message: "공지를 불러오는 중입니다…")
@@ -176,6 +180,8 @@ struct BoardView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        // 위 판이 남색이라 검은 시계는 묻힌다. 상세에서 돌아올 때도 다시 흰색으로.
+        .statusBarStyle(.lightContent)
     }
 
     // MARK: - 사용 설명서 투어
@@ -431,7 +437,8 @@ struct BoardView: View {
             withAnimation(.easeOut(duration: 0.18)) { searchFieldHidden = hidden }
         }
 
-        guard offset > 12 else {
+        // 제목 띠가 다 지나간 뒤에 나온다. 그 전에 띄우면 띠 위 마크를 가린다.
+        guard offset > BoardHeaderView.bandHeight else {
             menuHideTask?.cancel()
             if menuHandleVisible {
                 withAnimation(.easeOut(duration: 0.2)) { menuHandleVisible = false }
